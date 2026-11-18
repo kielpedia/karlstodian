@@ -106,8 +106,8 @@ class ScanTest {
         r = client.putJson("/api/settings", """{"radarr_url": "http://evil:7878"}""")
         assertEquals(HttpStatusCode.BadRequest, r.status); assertTrue("re-enter" in r.obj().str("detail")!!)
         // with the key it's fine; bare host:port gets http:// added
-        r = client.putJson("/api/settings", """{"radarr_url": "192.168.1.114:7878", "radarr_api_key": "new"}""")
-        assertEquals(HttpStatusCode.OK, r.status); assertEquals("http://192.168.1.114:7878", Config.current.radarr_url)
+        r = client.putJson("/api/settings", """{"radarr_url": "10.0.0.7:7878", "radarr_api_key": "new"}""")
+        assertEquals(HttpStatusCode.OK, r.status); assertEquals("http://10.0.0.7:7878", Config.current.radarr_url)
 
         // bad cron and bad types rejected without changing anything
         assertEquals(HttpStatusCode.BadRequest, client.putJson("/api/settings", """{"scan_cron": "nope"}""").status)
