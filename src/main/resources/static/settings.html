@@ -1,0 +1,287 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Karlstodian · Settings</title>
+<style>
+  :root {
+    --bg: #f4f3ef; --panel: #ffffff; --ink: #1d1d1b; --muted: #6b6a64; --line: #e2e0d8;
+    --field: #faf9f6; --accent: #2f6f4f; --accent-ink: #fff; --ok: #2f7d4f; --ok-bg: #e5f2ea;
+    --err: #b3412e; --err-bg: #f8e6e2; --idle: #8a887f; --idle-bg: #eeede8; --focus: #2f6f4f55;
+    --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+    --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #151614; --panel: #1d1f1c; --ink: #e9e8e2; --muted: #9a998f; --line: #2e302c;
+      --field: #171816; --accent: #5fae84; --accent-ink: #0f1a14; --ok: #6cc394; --ok-bg: #1d3327;
+      --err: #e8846f; --err-bg: #3a221d; --idle: #8f8e86; --idle-bg: #262824; --focus: #5fae8455;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.5 var(--sans); }
+  .wrap { max-width: 980px; margin: 0 auto; padding: 32px 16px 120px; }
+  header { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 28px; }
+  header h1 { margin: 0; font-size: 22px; letter-spacing: -0.01em; }
+  header h1 span { color: var(--muted); font-weight: 400; }
+  header p { margin: 0; color: var(--muted); font-size: 14px; flex-basis: 100%; }
+  header { align-items: center; gap: 20px; }
+  nav { display: flex; gap: 4px; }
+  nav a { color: var(--muted); text-decoration: none; padding: 5px 11px; border-radius: 7px; font-size: 14px; }
+  nav a:hover { color: var(--ink); background: var(--idle-bg); }
+  nav a.on { color: var(--ink); background: var(--panel); border: 1px solid var(--line); }
+  h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 32px 0 12px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 14px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+  .card-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .card-head h3 { margin: 0; font-size: 16px; }
+  .pill { font-size: 12px; padding: 2px 9px; border-radius: 99px; background: var(--idle-bg); color: var(--idle); white-space: nowrap; }
+  .pill.ok { background: var(--ok-bg); color: var(--ok); }
+  .pill.err { background: var(--err-bg); color: var(--err); }
+  .help { margin: -4px 0 0; color: var(--muted); font-size: 13px; }
+  label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--muted); }
+  .label-row { display: flex; justify-content: space-between; align-items: baseline; }
+  input[type=text], input[type=password], input[type=number], textarea {
+    font: 14px var(--mono); color: var(--ink); background: var(--field); border: 1px solid var(--line);
+    border-radius: 7px; padding: 8px 10px; width: 100%;
+  }
+  textarea { resize: vertical; min-height: 64px; }
+  input:focus, textarea:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--focus); }
+  input.dirty, textarea.dirty { border-color: var(--accent); }
+  .linkbtn { background: none; border: 0; padding: 0; color: var(--accent); font: inherit; font-size: 12px; cursor: pointer; }
+  .linkbtn:hover { text-decoration: underline; }
+  .row { display: flex; gap: 10px; align-items: center; }
+  button.btn { font: 600 14px var(--sans); border-radius: 7px; padding: 8px 14px; cursor: pointer; border: 1px solid var(--line); background: var(--field); color: var(--ink); }
+  button.btn:hover { border-color: var(--muted); }
+  button.btn.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+  button.btn:disabled { opacity: .5; cursor: default; }
+  .result { font-size: 13px; color: var(--muted); min-height: 1.5em; overflow-wrap: anywhere; }
+  .result.ok { color: var(--ok); } .result.err { color: var(--err); }
+  .check { flex-direction: row; align-items: center; gap: 8px; color: var(--ink); font-size: 14px; }
+  .bar { position: fixed; left: 0; right: 0; bottom: 0; background: var(--panel); border-top: 1px solid var(--line); }
+  .bar .inner { max-width: 980px; margin: 0 auto; padding: 12px 16px; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .bar .msg { font-size: 14px; color: var(--muted); }
+  .bar .msg.err { color: var(--err); } .bar .msg.ok { color: var(--ok); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Karlstodian</h1>
+    <nav><a href="/library">Library</a><a href="/settings" class="on">Settings</a></nav>
+    <p>Where each service lives and how to sign in to it. Saved keys never leave the server — leave a key field blank to keep it.</p>
+  </header>
+
+  <h2>Services</h2>
+  <div class="grid" id="services"></div>
+
+  <h2>General</h2>
+  <div class="grid">
+    <div class="card">
+      <label>Path mappings
+        <textarea data-field="path_maps" rows="3" placeholder="/data => /mnt/media"></textarea>
+      </label>
+      <p class="help">One per line: how Radarr/Sonarr see a path <code>=&gt;</code> where it's mounted here. Needed for hardlink checks; leave empty if paths are identical.</p>
+    </div>
+    <div class="card">
+      <label>Keep tag <input type="text" data-field="keep_tag"></label>
+      <label>Quality-exempt tag <input type="text" data-field="quality_ok_tag"></label>
+      <p class="help">Radarr/Sonarr tags that protect an item, or exempt it from the quality factor.</p>
+    </div>
+    <div class="card">
+      <label>Low quality at or below (vertical px) <input type="number" data-field="low_quality_max_resolution" min="240" step="1"></label>
+      <label>Scan schedule (cron)
+        <input type="text" data-field="scan_cron" placeholder="0 4 * * *">
+      </label>
+      <p class="help" id="next-scan">Empty disables scheduled scans.</p>
+      <label class="check"><input type="checkbox" data-field="verify_ssl"> Verify HTTPS certificates</label>
+    </div>
+    <div class="card">
+      <label>Age counts fully after (days on Plex) <input type="number" data-field="age_cap_days" min="1" step="1"></label>
+      <label>"Not watched in a long time" after (days) <input type="number" data-field="recency_cap_days" min="1" step="1"></label>
+      <label>Don't score titles added in the last (days) <input type="number" data-field="new_grace_days" min="0" step="1"></label>
+      <p class="help">Scoring thresholds. Factor weights are set with the sliders on the Library page.</p>
+    </div>
+  </div>
+</div>
+
+<div class="bar"><div class="inner">
+  <span class="msg" id="bar-msg">No unsaved changes</span>
+  <div class="row">
+    <button class="btn" id="discard" disabled>Discard</button>
+    <button class="btn primary" id="save" disabled>Save</button>
+  </div>
+</div></div>
+
+<script>
+const SERVICES = [
+  { id: "plex", name: "Plex", fields: [["plex_url", "URL", "http://192.168.1.10:32400"], ["plex_token", "Token"]],
+    help: "Token: Plex Web → any item → ⋯ → Get Info → View XML; it's X-Plex-Token in the URL." },
+  { id: "tautulli", name: "Tautulli", fields: [["tautulli_url", "URL", "http://192.168.1.10:8181"], ["tautulli_api_key", "API key"]],
+    help: "Settings → Web Interface → API. Enable it, then copy the key." },
+  { id: "radarr", name: "Radarr", fields: [["radarr_url", "URL", "http://192.168.1.114:7878"], ["radarr_api_key", "API key"]],
+    help: "Settings → General → Security → API Key." },
+  { id: "sonarr", name: "Sonarr", fields: [["sonarr_url", "URL", "http://192.168.1.114:8989"], ["sonarr_api_key", "API key"]],
+    help: "Settings → General → Security → API Key." },
+  { id: "qbittorrent", name: "qBittorrent", fields: [["qbit_url", "URL", "http://192.168.1.10:8080"], ["qbit_username", "Username"], ["qbit_password", "Password"]],
+    help: "The username and password you use for the WebUI." },
+];
+const SECRETS = new Set(["plex_token", "tautulli_api_key", "radarr_api_key", "sonarr_api_key", "qbit_password"]);
+let saved = {};          // values as last loaded from the server
+let clears = new Set();  // secrets the user asked to remove
+const $ = (s, el = document) => el.querySelector(s);
+const $$ = (s, el = document) => [...el.querySelectorAll(s)];
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+function renderServices() {
+  $("#services").innerHTML = SERVICES.map(s => `
+    <div class="card" data-service="${s.id}">
+      <div class="card-head"><h3>${s.name}</h3><span class="pill" data-pill>…</span></div>
+      <p class="help">${s.help}</p>
+      ${s.fields.map(([f, label, ph]) => SECRETS.has(f) ? `
+        <label><span class="label-row">${label}<button type="button" class="linkbtn" data-clear="${f}" hidden>Remove saved</button></span>
+          <input type="password" data-field="${f}" autocomplete="new-password" spellcheck="false"></label>` : `
+        <label>${label}<input type="text" data-field="${f}" placeholder="${ph || ""}" spellcheck="false" autocomplete="off"></label>`).join("")}
+      <div class="row"><button type="button" class="btn" data-test>Test connection</button></div>
+      <div class="result" data-result></div>
+    </div>`).join("");
+}
+
+const pathMapsToText = pm => (pm || []).map(([a, b]) => `${a} => ${b}`).join("\n");
+function textToPathMaps(t) {
+  return t.split("\n").map(l => l.trim()).filter(Boolean).map(l => {
+    const parts = l.split(/\s*(?:=>|->|→)\s*/);
+    if (parts.length !== 2 || !parts[0] || !parts[1]) throw new Error(`Path mapping "${l}" should look like  /data => /mnt/media`);
+    return parts;
+  });
+}
+
+function fill() {
+  for (const el of $$("[data-field]")) {
+    const f = el.dataset.field, v = saved[f];
+    el.classList.remove("dirty");
+    if (SECRETS.has(f)) {
+      el.value = "";
+      const isSet = v && v.set && !clears.has(f);
+      el.placeholder = clears.has(f) ? "Will be removed on save" : isSet ? "•••••••• (saved)" : "Not set";
+      const btn = $(`[data-clear="${f}"]`); if (btn) btn.hidden = !(v && v.set) || clears.has(f);
+    } else if (el.type === "checkbox") el.checked = !!v;
+    else if (f === "path_maps") el.value = pathMapsToText(v);
+    else el.value = v ?? "";
+  }
+  updateBar();
+}
+
+function readField(el) {
+  const f = el.dataset.field;
+  if (el.type === "checkbox") return el.checked;
+  if (el.type === "number") return el.value === "" ? null : Number(el.value);
+  if (f === "path_maps") return textToPathMaps(el.value);
+  return el.value;
+}
+
+function isDirty(el) {
+  const f = el.dataset.field;
+  if (SECRETS.has(f)) return el.value !== "";
+  if (f === "path_maps") return el.value.trim() !== pathMapsToText(saved[f]);
+  if (el.type === "checkbox") return el.checked !== !!saved[f];
+  return String(el.value) !== String(saved[f] ?? "");
+}
+
+// Collect changed fields (optionally only within one card)
+function changes(scope = document) {
+  const out = {};
+  for (const el of $$("[data-field]", scope)) if (isDirty(el)) out[el.dataset.field] = readField(el);
+  const c = [...clears].filter(f => scope === document || $(`[data-field="${f}"]`, scope));
+  if (c.length) out._clear = c;
+  return out;
+}
+
+function updateBar(msg, cls) {
+  let n = 0;
+  for (const el of $$("[data-field]")) { const d = isDirty(el); el.classList.toggle("dirty", d); n += d; }
+  n += clears.size;
+  $("#save").disabled = $("#discard").disabled = n === 0;
+  const m = $("#bar-msg");
+  m.className = "msg " + (cls || "");
+  m.textContent = msg || (n ? `${n} unsaved change${n > 1 ? "s" : ""}` : "No unsaved changes");
+}
+
+function showResult(card, r) {
+  const pill = $("[data-pill]", card), res = $("[data-result]", card);
+  if (r.ok) {
+    pill.className = "pill ok"; pill.textContent = "Connected";
+    const i = r.info || {};
+    res.className = "result ok";
+    res.textContent = [i.version && `v${i.version}`, i.plex_server && `Plex server: ${i.plex_server}`,
+                       i.libraries && `Libraries: ${i.libraries.join(", ") || "none"}`].filter(Boolean).join(" · ") || "OK";
+  } else if (r.configured === false) {
+    pill.className = "pill"; pill.textContent = "Not set up"; res.className = "result"; res.textContent = "";
+  } else {
+    pill.className = "pill err"; pill.textContent = "Failed"; res.className = "result err"; res.textContent = r.error;
+  }
+}
+
+async function api(method, url, body) {
+  const r = await fetch(url, { method, headers: { "Content-Type": "application/json" }, body: body && JSON.stringify(body) });
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data.detail || `HTTP ${r.status}`);
+  return data;
+}
+
+async function testCard(card) {
+  const btn = $("[data-test]", card);
+  let body;
+  try { body = changes(card); } catch (e) { return showResult(card, { ok: false, error: e.message }); }
+  const v = $('[data-field="verify_ssl"]'); if (isDirty(v)) body.verify_ssl = v.checked;
+  btn.disabled = true; btn.textContent = "Testing…";
+  try { showResult(card, await api("POST", `/api/settings/test/${card.dataset.service}`, body)); }
+  catch (e) { showResult(card, { ok: false, error: e.message }); }
+  finally { btn.disabled = false; btn.textContent = "Test connection"; }
+}
+
+async function testAllSaved() {
+  for (const card of $$("[data-service]")) {
+    $("[data-pill]", card).textContent = "Checking…";
+    api("POST", `/api/settings/test/${card.dataset.service}`, {}).then(r => showResult(card, r))
+      .catch(e => showResult(card, { ok: false, error: e.message }));
+  }
+}
+
+function setNextScan(iso) {
+  $("#next-scan").textContent = iso ? `Next scan: ${new Date(iso).toLocaleString()}` : "Empty disables scheduled scans.";
+}
+
+async function load() {
+  const data = await api("GET", "/api/settings");
+  saved = data.values; clears.clear(); fill(); setNextScan(data.next_scan);
+}
+
+async function save() {
+  let body;
+  try { body = changes(); } catch (e) { return updateBar(e.message, "err"); }
+  const touched = new Set(SERVICES.filter(s => s.fields.some(([f]) => f in body || (body._clear || []).includes(f))).map(s => s.id));
+  $("#save").disabled = true;
+  try {
+    const data = await api("PUT", "/api/settings", body);
+    saved = data.values; clears.clear(); fill(); setNextScan(data.next_scan);
+    updateBar("Saved", "ok");
+    for (const card of $$("[data-service]")) if (touched.has(card.dataset.service) || "verify_ssl" in body) testCard(card);
+  } catch (e) { updateBar(e.message, "err"); $("#save").disabled = false; }
+}
+
+renderServices();
+document.addEventListener("input", e => { if (e.target.dataset.field) updateBar(); });
+document.addEventListener("click", e => {
+  const t = e.target;
+  if (t.matches("[data-test]")) testCard(t.closest("[data-service]"));
+  if (t.dataset.clear) { clears.add(t.dataset.clear); fill(); }
+});
+$("#save").onclick = save;
+$("#discard").onclick = () => { clears.clear(); fill(); };
+window.addEventListener("beforeunload", e => { if (!$("#save").disabled) e.preventDefault(); });
+load().then(testAllSaved).catch(e => updateBar(`Couldn't load settings: ${e.message}`, "err"));
+</script>
+</body>
+</html>

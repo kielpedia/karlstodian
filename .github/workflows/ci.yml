@@ -1,0 +1,65 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: gradle/actions/setup-gradle@v4
+      - run: ./gradlew test --console=plain
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: test-report
+          path: build/reports/tests/test
+
+  # Every merge to main becomes a release; the server's updater installs it within ~5 minutes.
+  release:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: test
+    runs-on: ubuntu-latest
+    concurrency:
+      group: release
+      cancel-in-progress: false
+    permissions:
+      contents: write      # create the release
+      id-token: write      # sign the provenance attestation
+      attestations: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: gradle/actions/setup-gradle@v4
+      - run: ./gradlew buildFatJar --console=plain
+      - name: Checksum
+        working-directory: build/libs
+        run: sha256sum karlstodian.jar > karlstodian.jar.sha256
+      - uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: build/libs/karlstodian.jar
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: build-${{ github.run_number }}
+        run: |
+          gh release create "$TAG" build/libs/karlstodian.jar build/libs/karlstodian.jar.sha256 \
+            --target "$GITHUB_SHA" --title "$TAG" \
+            --notes "Built from ${GITHUB_SHA::7}: $(git log -1 --format=%s)"

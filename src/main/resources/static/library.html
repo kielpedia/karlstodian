@@ -1,0 +1,618 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Karlstodian · Library</title>
+<style>
+  :root {
+    --bg: #f4f3ef; --panel: #ffffff; --ink: #1d1d1b; --muted: #6b6a64; --line: #e2e0d8; --row-hover: #f8f7f3;
+    --field: #faf9f6; --accent: #2f6f4f; --accent-ink: #fff; --accent-soft: #e5f0ea;
+    --ok: #2f7d4f; --ok-bg: #e5f2ea; --warn: #9a5b12; --warn-bg: #f7ecd9; --err: #b3412e; --err-bg: #f8e6e2;
+    --idle: #8a887f; --idle-bg: #eeede8; --focus: #2f6f4f55; --bar: #d9d6cb; --shade: rgba(20,20,18,.28);
+    --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+    --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #151614; --panel: #1d1f1c; --ink: #e9e8e2; --muted: #9a998f; --line: #2e302c; --row-hover: #232522;
+      --field: #171816; --accent: #5fae84; --accent-ink: #0f1a14; --accent-soft: #1f3328;
+      --ok: #6cc394; --ok-bg: #1d3327; --warn: #e2b062; --warn-bg: #3a2e1a; --err: #e8846f; --err-bg: #3a221d;
+      --idle: #8f8e86; --idle-bg: #262824; --focus: #5fae8455; --bar: #3a3d37; --shade: rgba(0,0,0,.5);
+    }
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.5 var(--sans); }
+  button { font: inherit; color: inherit; }
+  .wrap { max-width: 1240px; margin: 0 auto; padding: 24px 16px 64px; }
+
+  /* top bar */
+  .top { display: flex; align-items: center; gap: 20px; flex-wrap: wrap; margin-bottom: 22px; }
+  .brand { font-weight: 700; font-size: 20px; letter-spacing: -0.01em; }
+  nav { display: flex; gap: 4px; }
+  nav a { color: var(--muted); text-decoration: none; padding: 5px 11px; border-radius: 7px; font-size: 14px; }
+  nav a:hover { color: var(--ink); background: var(--idle-bg); }
+  nav a.on { color: var(--ink); background: var(--panel); border: 1px solid var(--line); }
+  .scan { margin-left: auto; display: flex; align-items: center; gap: 12px; }
+  .scan-status { font-size: 13px; color: var(--muted); text-align: right; }
+  .scan-status.err { color: var(--err); }
+  .btn { font-weight: 600; font-size: 14px; border-radius: 7px; padding: 7px 14px; cursor: pointer; border: 1px solid var(--line); background: var(--panel); }
+  .btn:hover { border-color: var(--muted); }
+  .btn.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+  .btn:disabled { opacity: .55; cursor: default; }
+
+  /* tiles */
+  .tiles { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; margin-bottom: 20px; }
+  .tile { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; text-align: left; cursor: pointer; }
+  .tile:hover { border-color: var(--muted); }
+  .tile.on { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+  .tile .k { font-size: 12px; text-transform: uppercase; letter-spacing: .07em; color: var(--muted); }
+  .tile .v { font-size: 26px; font-weight: 650; letter-spacing: -0.02em; margin-top: 2px; font-variant-numeric: tabular-nums; }
+  .tile .s { font-size: 13px; color: var(--muted); }
+
+  /* filters */
+  .filters { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 10px; }
+  .seg { display: inline-flex; background: var(--idle-bg); border-radius: 8px; padding: 3px; }
+  .seg button { border: 0; background: none; padding: 5px 12px; border-radius: 6px; cursor: pointer; font-size: 14px; color: var(--muted); }
+  .seg button.on { background: var(--panel); color: var(--ink); box-shadow: 0 1px 2px rgba(0,0,0,.08); }
+  input[type=search] { font: 14px var(--sans); color: var(--ink); background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 7px 11px; width: 240px; }
+  input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--focus); }
+  .chip { border: 1px solid var(--line); background: var(--panel); border-radius: 99px; padding: 4px 12px; font-size: 13px; cursor: pointer; color: var(--muted); }
+  .chip:hover { color: var(--ink); }
+  .chip.on { background: var(--accent-soft); border-color: var(--accent); color: var(--ink); }
+  .resultline { font-size: 13px; color: var(--muted); margin: 0 0 8px 2px; }
+
+  /* table */
+  .tablewrap { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th { text-align: left; font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted);
+       padding: 10px 12px; border-bottom: 1px solid var(--line); white-space: nowrap; user-select: none; cursor: pointer; }
+  th:hover { color: var(--ink); }
+  th .arr { display: inline-block; width: 1em; color: var(--accent); }
+  td { padding: 9px 12px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+  tbody tr { cursor: pointer; }
+  tbody tr:hover { background: var(--row-hover); }
+  tbody tr.sel { background: var(--accent-soft); }
+  tbody tr:last-child td { border-bottom: 0; }
+  .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .title { font-weight: 550; }
+  .sub { color: var(--muted); font-size: 13px; font-weight: 400; }
+  .badge { display: inline-block; font-size: 11px; padding: 1px 7px; border-radius: 99px; background: var(--idle-bg); color: var(--idle); margin-left: 6px; vertical-align: 1px; white-space: nowrap; }
+  .badge.warn { background: var(--warn-bg); color: var(--warn); }
+  .badge.ok { background: var(--ok-bg); color: var(--ok); }
+  .sizecell { display: flex; align-items: center; gap: 8px; justify-content: flex-end; }
+  .sizebar { width: 56px; height: 5px; background: var(--idle-bg); border-radius: 3px; overflow: hidden; flex: none; }
+  .sizebar i { display: block; height: 100%; background: var(--bar); }
+  .never { color: var(--muted); }
+  .q-low { color: var(--warn); font-weight: 600; }
+  .q-ex { color: var(--muted); text-decoration: line-through; }
+  .empty { padding: 48px 16px; text-align: center; color: var(--muted); }
+  .more { display: block; width: 100%; padding: 12px; border: 0; border-top: 1px solid var(--line); background: none; color: var(--accent); cursor: pointer; font-weight: 600; }
+
+  /* score */
+  .scorecell { display: flex; align-items: center; gap: 8px; justify-content: flex-end; font-weight: 650; font-variant-numeric: tabular-nums; }
+  .scorebar { width: 44px; height: 6px; background: var(--idle-bg); border-radius: 3px; overflow: hidden; flex: none; }
+  .scorebar i { display: block; height: 100%; background: var(--warn); }
+  .excl { color: var(--muted); font-size: 12px; font-weight: 400; white-space: nowrap; }
+  .weights { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; margin-bottom: 12px; }
+  .weights-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; }
+  .weights-head b { font-size: 14px; }
+  .weights-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px 22px; }
+  .w label { display: flex; justify-content: space-between; font-size: 13px; color: var(--muted); }
+  .w label b { color: var(--ink); font-weight: 600; }
+  .w label span { font-variant-numeric: tabular-nums; }
+  .w input[type=range] { width: 100%; accent-color: var(--accent); }
+  .w p { margin: 0; font-size: 12px; color: var(--muted); }
+  .why { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .why td { padding: 8px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+  .why tr:last-child td { border-bottom: 0; }
+  .why .f { font-weight: 600; width: 72px; }
+  .why .pts { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; padding-left: 10px; }
+  .why .bar { height: 4px; background: var(--idle-bg); border-radius: 2px; margin-top: 5px; overflow: hidden; }
+  .why .bar i { display: block; height: 100%; background: var(--warn); }
+  .bigscore { display: flex; align-items: baseline; gap: 10px; margin-bottom: 4px; }
+  .bigscore b { font-size: 30px; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+
+  /* drawer */
+  .shade { position: fixed; inset: 0; background: var(--shade); opacity: 0; pointer-events: none; transition: opacity .15s; }
+  .shade.open { opacity: 1; pointer-events: auto; }
+  .drawer { position: fixed; top: 0; right: 0; bottom: 0; width: min(520px, 100vw); background: var(--panel); border-left: 1px solid var(--line);
+            transform: translateX(100%); transition: transform .18s ease; overflow-y: auto; padding: 20px 22px 40px; }
+  .drawer.open { transform: none; }
+  .d-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+  .d-head h2 { margin: 0; font-size: 21px; letter-spacing: -0.01em; line-height: 1.25; }
+  .x { border: 0; background: var(--idle-bg); width: 30px; height: 30px; border-radius: 8px; cursor: pointer; font-size: 18px; line-height: 1; flex: none; }
+  .note { background: var(--warn-bg); color: var(--warn); border-radius: 8px; padding: 8px 12px; font-size: 13px; margin-top: 12px; }
+  .toggles { display: grid; gap: 8px; margin: 16px 0 4px; }
+  .toggle { display: flex; align-items: center; justify-content: space-between; gap: 12px; border: 1px solid var(--line); border-radius: 9px; padding: 10px 12px; }
+  .toggle b { font-weight: 600; font-size: 14px; display: block; }
+  .toggle span { font-size: 13px; color: var(--muted); }
+  .sw { position: relative; width: 40px; height: 23px; flex: none; }
+  .sw input { opacity: 0; width: 0; height: 0; position: absolute; }
+  .sw i { position: absolute; inset: 0; background: var(--line); border-radius: 99px; cursor: pointer; transition: background .15s; }
+  .sw i::after { content: ""; position: absolute; width: 17px; height: 17px; left: 3px; top: 3px; background: #fff; border-radius: 50%; transition: transform .15s; }
+  .sw input:checked + i { background: var(--accent); }
+  .sw input:checked + i::after { transform: translateX(17px); }
+  .sw input:disabled + i { opacity: .6; cursor: default; }
+  .sw input:focus-visible + i { box-shadow: 0 0 0 3px var(--focus); }
+  .d-sec { margin-top: 22px; }
+  .d-sec h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .07em; color: var(--muted); margin: 0 0 8px; }
+  .stats { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 9px; overflow: hidden; }
+  .stats > div { background: var(--panel); padding: 9px 12px; }
+  .stats .k { font-size: 12px; color: var(--muted); }
+  .stats .v { font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .mini { width: 100%; font-size: 13px; border: 1px solid var(--line); border-radius: 9px; border-collapse: separate; border-spacing: 0; overflow: hidden; }
+  .mini th { cursor: default; font-size: 11px; padding: 7px 10px; }
+  .mini th:hover { color: var(--muted); }
+  .mini td { padding: 7px 10px; }
+  .mini tr:last-child td { border-bottom: 0; }
+  .mono { font-family: var(--mono); font-size: 12px; overflow-wrap: anywhere; }
+  .muted { color: var(--muted); font-size: 13px; }
+  details summary { cursor: pointer; color: var(--accent); font-size: 13px; font-weight: 600; margin-bottom: 8px; }
+
+  @media (max-width: 980px) {
+    .tiles { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .col-added { display: none; }
+    .weights-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  }
+  @media (max-width: 720px) {
+    .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .tile .v { font-size: 22px; }
+    .col-last, .col-q, .sizebar, .scorebar { display: none; }
+    input[type=search] { width: 100%; order: -1; }
+    .scan { margin-left: 0; width: 100%; justify-content: space-between; }
+    .scan-status { text-align: left; }
+    td, th { padding-left: 10px; padding-right: 10px; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <span class="brand">Karlstodian</span>
+    <nav><a href="/library" class="on">Library</a><a href="/settings">Settings</a></nav>
+    <div class="scan">
+      <span class="scan-status" id="scan-status">…</span>
+      <button class="btn primary" id="scan-btn">Scan now</button>
+    </div>
+  </div>
+
+  <div class="tiles" id="tiles"></div>
+
+  <div class="filters">
+    <div class="seg" id="kind">
+      <button data-kind="" class="on">All</button><button data-kind="movie">Movies</button><button data-kind="show">Shows</button>
+    </div>
+    <input type="search" id="q" placeholder="Search titles" autocomplete="off">
+    <button class="chip" data-f="never">Never played</button>
+    <button class="chip" data-f="lowq">Low quality</button>
+    <button class="chip" data-f="noplex">Not in Plex</button>
+    <button class="chip" data-f="kept">Protected / exempt</button>
+    <button class="chip" id="weights-btn">Scoring weights</button>
+  </div>
+  <div class="weights" id="weights" hidden>
+    <div class="weights-head"><b>How much each factor counts</b><span class="muted" id="weights-status">Only the proportions matter. Changes save automatically.</span></div>
+    <div class="weights-grid" id="weights-grid"></div>
+  </div>
+  <p class="resultline" id="resultline"></p>
+
+  <div class="tablewrap">
+    <table>
+      <thead><tr>
+        <th data-sort="title">Title<span class="arr"></span></th>
+        <th data-sort="score" class="num">Score<span class="arr"></span></th>
+        <th data-sort="size" class="num">Size<span class="arr"></span></th>
+        <th data-sort="added" class="num col-added">On Plex<span class="arr"></span></th>
+        <th data-sort="plays" class="num">Plays<span class="arr"></span></th>
+        <th data-sort="last" class="num col-last">Last played<span class="arr"></span></th>
+        <th data-sort="res" class="num col-q">Quality<span class="arr"></span></th>
+      </tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+    <div id="empty" class="empty" hidden></div>
+    <button class="more" id="more" hidden></button>
+  </div>
+</div>
+
+<div class="shade" id="shade"></div>
+<aside class="drawer" id="drawer" aria-hidden="true"></aside>
+
+<script>
+const $ = (s, el = document) => el.querySelector(s);
+const $$ = (s, el = document) => [...el.querySelectorAll(s)];
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const PAGE = 200;
+
+let items = [], lowRes = 720;
+let state = { kind: "", q: "", f: new Set(), sort: "score", dir: -1, shown: PAGE, openId: null };
+const FACTOR_INFO = {
+  size: ["Size", "Bigger titles score higher"],
+  age: ["Age", "Longer on Plex scores higher"],
+  watch: ["Watching", "Less watched, and longer ago, scores higher"],
+  quality: ["Quality", "More low-resolution content scores higher"],
+};
+let weights = { size: 30, age: 20, watch: 40, quality: 10 };
+
+function liveScore(i) {
+  if (!i.factors || i.excluded) return null;
+  const wsum = Object.values(weights).reduce((a, b) => a + b, 0);
+  if (!wsum) return 0;
+  return Object.keys(weights).reduce((s, k) => s + weights[k] * i.factors[k].score, 0) / wsum;
+}
+
+// ---------------------------------------------------------------- formatting
+function bytes(b) {
+  if (!b) return "0 GB";
+  if (b >= 1e12) return (b / 1e12).toFixed(b >= 1e13 ? 1 : 2) + " TB";
+  if (b >= 1e9) return (b / 1e9).toFixed(b >= 1e11 ? 0 : 1) + " GB";
+  return (b / 1e6).toFixed(0) + " MB";
+}
+function ago(iso) {
+  if (!iso) return null;
+  const d = (Date.now() - new Date(iso)) / 864e5;
+  if (d < 1 / 1440) return "just now";
+  if (d < 1 / 24) return `${Math.floor(d * 1440)} min ago`;
+  if (d < 1) return `${Math.floor(d * 24)} h ago`;
+  if (d < 31) return `${Math.floor(d)} d ago`;
+  if (d < 365) return `${Math.floor(d / 30.4)} mo ago`;
+  const y = d / 365.25;
+  return `${y < 10 ? y.toFixed(1).replace(/\.0$/, "") : Math.floor(y)} y ago`;
+}
+function watchedShare(i) {
+  if (i.kind !== "show") return 0;
+  const eps = i.episode_count || 0;
+  return eps ? Math.min(1, Math.max(i.watched_episodes_all || 0, i.watched_episode_count || 0) / eps) : 0;
+}
+function pctWatched(i) {
+  const p = watchedShare(i) * 100;
+  return p > 0 && p < 1 ? "<1%" : Math.round(p) + "%";
+}
+const date = iso => iso ? new Date(iso).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" }) : "—";
+const resLabel = r => r ? (r >= 2000 ? "4K" : r + "p") : "?";
+function resRange(i) {
+  if (!i.min_resolution) return "—";
+  return i.min_resolution === i.max_resolution ? resLabel(i.min_resolution) : `${resLabel(i.min_resolution)}–${resLabel(i.max_resolution)}`;
+}
+function dur(sec) {
+  if (!sec) return "—";
+  const d = sec / 86400;
+  return d >= 1 ? `${d >= 10 ? Math.round(d) : d.toFixed(1)} days` : `${Math.round(sec / 3600)} h`;
+}
+
+// ---------------------------------------------------------------- data
+async function api(method, url, body) {
+  const r = await fetch(url, { method, headers: { "Content-Type": "application/json" }, body: body && JSON.stringify(body) });
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data.detail || `HTTP ${r.status}`);
+  return data;
+}
+async function loadItems() {
+  const out = [];
+  for (let off = 0; ; off += 1000) {
+    const r = await api("GET", `/api/items?limit=1000&offset=${off}&sort=title`);
+    out.push(...r.items);
+    if (r.weights) weights = { ...weights, ...r.weights };
+    if (off + 1000 >= r.total) break;
+  }
+  items = out;
+}
+
+const isLow = i => i.low_quality_bytes > 0;
+const isNever = i => i.in_plex && i.play_count === 0;
+const isKept = i => i.keep_effective || i.quality_exempt_effective;
+const FILTERS = { never: isNever, lowq: i => isLow(i) && !i.quality_exempt_effective, noplex: i => !i.in_plex, kept: isKept };
+const SORTERS = {
+  score: i => liveScore(i),
+  title: i => i.title.toLowerCase(),
+  size: i => i.size_bytes,
+  added: i => i.plex_added_at ? -new Date(i.plex_added_at) : null,   // larger = older
+  plays: i => i.kind === "show" ? watchedShare(i) * 1000 + i.play_count / 1e6 : i.play_count,
+  last: i => i.last_played_at ? new Date(i.last_played_at).getTime() : null,
+  res: i => i.min_resolution,
+};
+const DEFAULT_DIR = { score: -1, title: 1, size: -1, added: -1, plays: 1, last: 1, res: 1 };
+
+function view() {
+  const q = state.q.trim().toLowerCase();
+  let v = items.filter(i =>
+    (!state.kind || i.kind === state.kind) &&
+    (!q || i.title.toLowerCase().includes(q)) &&
+    [...state.f].every(f => FILTERS[f](i)));
+  const key = SORTERS[state.sort], dir = state.dir;
+  v.sort((a, b) => {
+    const x = key(a), y = key(b);
+    if (x === y) return a.title.localeCompare(b.title);
+    if (x === null || x === undefined) return 1;      // blanks always last
+    if (y === null || y === undefined) return -1;
+    return (x < y ? -1 : 1) * dir;
+  });
+  return v;
+}
+
+// ---------------------------------------------------------------- render
+function tile(key, label, value, sub, on) {
+  return `<button class="tile ${on ? "on" : ""}" data-tile="${key}"><div class="k">${label}</div><div class="v">${value}</div><div class="s">${sub}</div></button>`;
+}
+function renderTiles() {
+  const sum = a => a.reduce((s, i) => s + i.size_bytes, 0);
+  const mv = items.filter(i => i.kind === "movie"), sh = items.filter(i => i.kind === "show");
+  const nv = items.filter(isNever), lq = items.filter(FILTERS.lowq);
+  const lqBytes = lq.reduce((s, i) => s + i.low_quality_bytes, 0);
+  const onlyKind = k => state.kind === k && state.f.size === 0;
+  const onlyF = f => !state.kind && state.f.size === 1 && state.f.has(f);
+  $("#tiles").innerHTML =
+    tile("all", "Library", bytes(sum(items)), `${items.length} titles`, !state.kind && !state.f.size) +
+    tile("movie", "Movies", bytes(sum(mv)), `${mv.length} titles`, onlyKind("movie")) +
+    tile("show", "Shows", bytes(sum(sh)), `${sh.length} series`, onlyKind("show")) +
+    tile("never", "Never played", bytes(sum(nv)), `${nv.length} titles`, onlyF("never")) +
+    tile("lowq", `${lowRes}p or lower`, bytes(lqBytes), `in ${lq.length} titles`, onlyF("lowq"));
+}
+
+function row(i, maxSize) {
+  const low = isLow(i), ex = i.quality_exempt_effective;
+  const badges = [
+    i.kind === "show" ? `<span class="badge">Show</span>` : "",
+    !i.in_plex ? `<span class="badge warn">Not in Plex</span>` : "",
+    i.keep_effective ? `<span class="badge ok">Protected</span>` : "",
+  ].join("");
+  const viewers = `<span class="sub"> · ${i.unique_viewers} ${i.unique_viewers === 1 ? "viewer" : "viewers"}</span>`;
+  const plays = !i.in_plex ? `<span class="never">—</span>`
+    : i.kind === "show" ? (watchedShare(i) === 0 ? `<span class="never">0% watched</span>`
+        : `${pctWatched(i)} watched${i.unique_viewers ? viewers : ""}`)
+    : i.play_count === 0 ? `<span class="never">0</span>`
+    : `${i.play_count}${viewers}`;
+  const sc = liveScore(i);
+  const scoreCell = sc === null ? `<span class="excl">${esc(i.excluded || "—")}</span>`
+    : `<div class="scorecell">${Math.round(sc)}<span class="scorebar"><i style="width:${Math.max(2, sc)}%"></i></span></div>`;
+  return `<tr data-id="${i.id}" class="${state.openId === i.id ? "sel" : ""}">
+    <td><span class="title">${esc(i.title)}</span> <span class="sub">${i.year ?? ""}</span>${badges}</td>
+    <td class="num">${scoreCell}</td>
+    <td class="num"><div class="sizecell">${bytes(i.size_bytes)}<span class="sizebar"><i style="width:${Math.max(2, i.size_bytes / maxSize * 100)}%"></i></span></div></td>
+    <td class="num col-added">${ago(i.plex_added_at) ?? "—"}</td>
+    <td class="num">${plays}</td>
+    <td class="num col-last">${ago(i.last_played_at) ?? `<span class="never">Never</span>`}</td>
+    <td class="num col-q"><span class="${low ? (ex ? "q-ex" : "q-low") : ""}">${resRange(i)}</span></td>
+  </tr>`;
+}
+
+function render() {
+  const v = view();
+  const maxSize = Math.max(1, ...items.map(i => i.size_bytes));
+  $("#rows").innerHTML = v.slice(0, state.shown).map(i => row(i, maxSize)).join("");
+  const total = v.reduce((s, i) => s + i.size_bytes, 0);
+  $("#resultline").textContent = items.length ? `${v.length} of ${items.length} titles · ${bytes(total)}` : "";
+  const more = $("#more");
+  more.hidden = v.length <= state.shown;
+  more.textContent = `Show ${Math.min(PAGE, v.length - state.shown)} more`;
+  const empty = $("#empty");
+  empty.hidden = v.length > 0;
+  if (!items.length) empty.innerHTML = `No data yet. Set up your services in <a href="/settings">Settings</a>, then press <b>Scan now</b>.`;
+  else empty.textContent = "Nothing matches these filters.";
+  for (const th of $$("th[data-sort]")) $(".arr", th).textContent = th.dataset.sort === state.sort ? (state.dir === 1 ? "↑" : "↓") : "";
+  $$("#kind button").forEach(b => b.classList.toggle("on", b.dataset.kind === state.kind));
+  $$(".chip").forEach(c => c.classList.toggle("on", state.f.has(c.dataset.f)));
+  renderTiles();
+}
+
+// ---------------------------------------------------------------- detail drawer
+function resBreakdown(files) {
+  const g = {};
+  for (const f of files) {
+    const k = f.resolution || 0;
+    g[k] ??= { n: 0, size: 0 };
+    g[k].n++; g[k].size += f.size;
+  }
+  return Object.entries(g).sort((a, b) => b[0] - a[0]).map(([r, x]) => ({ r: +r, ...x }));
+}
+const base = p => p.split(/[\\/]/).pop();
+
+function toggleHtml(field, label, help, checked, viaTag) {
+  return `<label class="toggle"><div><b>${label}</b><span>${viaTag ? `Set by the <code>${esc(viaTag)}</code> tag in Radarr/Sonarr` : help}</span></div>
+    <span class="sw"><input type="checkbox" data-flag="${field}" ${checked ? "checked" : ""} ${viaTag ? "disabled" : ""}><i></i></span></label>`;
+}
+
+async function openItem(id) {
+  state.openId = id;
+  $$("tbody tr").forEach(tr => tr.classList.toggle("sel", +tr.dataset.id === id));
+  const dr = $("#drawer");
+  dr.innerHTML = `<div class="d-head"><h2>Loading…</h2><button class="x" data-close aria-label="Close">×</button></div>`;
+  dr.classList.add("open"); $("#shade").classList.add("open"); dr.setAttribute("aria-hidden", "false");
+  let d;
+  try { d = await api("GET", `/api/items/${id}`); }
+  catch (e) { dr.innerHTML = `<div class="d-head"><h2>Couldn't load</h2><button class="x" data-close>×</button></div><p class="muted">${esc(e.message)}</p>`; return; }
+  if (state.openId !== id) return;
+  window.__detail = d;
+  const tags = d.arr_tags || [];
+  const keepTag = !d.keep && d.keep_effective ? tags.find(t => /keep/i.test(t)) || "keep" : null;
+  const exTag = !d.quality_exempt && d.quality_exempt_effective ? tags.find(t => /quality/i.test(t)) || "quality" : null;
+  const linked = d.files.filter(f => f.torrent_hash).length;
+  const torrentNames = new Set(d.torrents.map(t => t.hash));
+  const missingTorrents = new Set(d.files.filter(f => f.torrent_hash && !torrentNames.has(f.torrent_hash)).map(f => f.torrent_hash)).size;
+
+  dr.innerHTML = `
+    <div class="d-head">
+      <div><h2>${esc(d.title)} <span class="sub">${d.year ?? ""}</span></h2>
+        <div class="muted">${d.kind === "show" ? "TV show" : "Movie"}${tags.length ? " · tags: " + tags.map(esc).join(", ") : ""}</div></div>
+      <button class="x" data-close aria-label="Close">×</button>
+    </div>
+    ${!d.in_plex ? `<div class="note">Not found in Plex, so there's no age or watch data. It may be missing from Plex or matched to the wrong title.</div>` : ""}
+    <div class="toggles">
+      ${toggleHtml("keep", "Protect", "Never suggest removing this", d.keep_effective, keepTag)}
+      ${toggleHtml("quality_exempt", "Quality exempt", `Don't count ${lowRes}p-or-lower files against it`, d.quality_exempt_effective, exTag)}
+    </div>
+
+    <div class="d-sec" id="why-sec">${whyHtml(d)}</div>
+
+    <div class="d-sec"><h3>Overview</h3><div class="stats">
+      <div><div class="k">Size</div><div class="v">${bytes(d.size_bytes)}</div></div>
+      ${d.kind === "show"
+        ? `<div><div class="k">Episodes watched (anyone)</div><div class="v">${d.in_plex ? `${Math.min(d.episode_count, Math.max(d.watched_episodes_all, d.watched_episode_count))} / ${d.episode_count} · ${pctWatched(d)}` : "—"}</div></div>`
+        : `<div><div class="k">Quality</div><div class="v">${resRange(d)}</div></div>`}
+      <div><div class="k">Added to Plex</div><div class="v">${date(d.plex_added_at)}</div></div>
+      <div><div class="k">On Plex for</div><div class="v">${(ago(d.plex_added_at) || "—").replace(" ago", "")}</div></div>
+      <div><div class="k">Plays (all users)</div><div class="v">${d.in_plex ? d.play_count : "—"}</div></div>
+      <div><div class="k">Last played</div><div class="v">${d.last_played_at ? date(d.last_played_at) : "Never"}</div></div>
+      <div><div class="k">Plex view count</div><div class="v">${d.in_plex ? d.plex_view_count : "—"}</div></div>
+      <div><div class="k">Last viewed (Plex)</div><div class="v">${d.plex_last_viewed_at ? date(d.plex_last_viewed_at) : "Never"}</div></div>
+    </div></div>
+
+    <div class="d-sec"><h3>Watched by</h3>
+      ${d.user_plays.length ? `<table class="mini"><thead><tr><th>User</th>${d.kind === "show" ? `<th class="num">Episodes</th>` : ""}<th class="num">Plays</th><th class="num">Last played</th></tr></thead><tbody>
+        ${d.user_plays.map(u => `<tr><td>${esc(u.user)}</td>${d.kind === "show" ? `<td class="num">${d.episode_count ? `${u.episodes_watched} · ${Math.round(100 * Math.min(1, u.episodes_watched / d.episode_count))}%` : u.episodes_watched}</td>` : ""}<td class="num">${u.plays}</td><td class="num">${date(u.last_played_at)}</td></tr>`).join("")}
+      </tbody></table><p class="muted">Plays count sessions Tautulli marked as watched. Started-but-unfinished sessions show as 0 plays.</p>`
+      : `<p class="muted">No one has watched this since Tautulli started recording history.</p>`}
+    </div>
+
+    <div class="d-sec"><h3>Quality</h3>
+      <table class="mini"><thead><tr><th>Resolution</th><th class="num">Files</th><th class="num">Size</th></tr></thead><tbody>
+        ${resBreakdown(d.files).map(g => `<tr><td class="${g.r && g.r <= lowRes ? (d.quality_exempt_effective ? "q-ex" : "q-low") : ""}">${resLabel(g.r)}</td><td class="num">${g.n}</td><td class="num">${bytes(g.size)}</td></tr>`).join("")}
+      </tbody></table>
+    </div>
+
+    <div class="d-sec"><h3>Torrents</h3>
+      ${d.torrents.length ? `<table class="mini"><thead><tr><th>Name</th><th class="num">Ratio</th><th class="num">Seeded</th></tr></thead><tbody>
+        ${d.torrents.map(t => `<tr><td class="mono">${esc(t.name)}<div class="muted">${esc(t.state || "")}${t.category ? " · " + esc(t.category) : ""}</div></td><td class="num">${t.ratio.toFixed(2)}</td><td class="num">${dur(t.seeding_time)}</td></tr>`).join("")}
+      </tbody></table>` : ""}
+      <p class="muted">${linked} of ${d.files.length} file${d.files.length === 1 ? "" : "s"} linked to a torrent through Radarr/Sonarr history${missingTorrents ? `; ${missingTorrents} of those torrents are no longer in qBittorrent` : ""}.</p>
+    </div>
+
+    <div class="d-sec"><h3>Files</h3>
+      <details ${d.files.length <= 3 ? "open" : ""}><summary>${d.files.length} file${d.files.length === 1 ? "" : "s"}</summary>
+        <table class="mini"><tbody>${d.files.map(f => `<tr><td class="mono" title="${esc(f.path)}">${esc(base(f.path))}</td><td class="num">${resLabel(f.resolution)}</td><td class="num">${bytes(f.size)}</td></tr>`).join("")}</tbody></table>
+      </details>
+    </div>`;
+}
+
+function whyHtml(d) {
+  const sc = liveScore(d);
+  const wsum = Object.values(weights).reduce((a, b) => a + b, 0) || 1;
+  const head = sc === null
+    ? `<div class="note" style="margin-top:0">Not scored: ${esc(d.excluded)}. The factors below are shown for reference.</div>`
+    : `<div class="bigscore"><b>${Math.round(sc)}</b><span class="muted">out of 100 · higher means a stronger candidate for removal</span></div>`;
+  const rows = Object.keys(FACTOR_INFO).map(k => {
+    const f = d.factors[k], pts = weights[k] / wsum * f.score;
+    return `<tr><td class="f">${FACTOR_INFO[k][0]}</td>
+      <td>${esc(f.note)}<div class="bar"><i style="width:${f.score}%"></i></div></td>
+      <td class="pts">${sc === null ? Math.round(f.score) + "/100" : `+${pts.toFixed(1)}`}<div class="muted">${Math.round(weights[k] / wsum * 100)}% weight</div></td></tr>`;
+  }).join("");
+  return `<h3>Why this score</h3>` + head + `<table class="why"><tbody>${rows}</tbody></table>`;
+}
+
+function refreshWhy() {
+  const sec = $("#why-sec");
+  if (sec && state.openId && window.__detail && window.__detail.id === state.openId) sec.innerHTML = whyHtml(window.__detail);
+}
+
+// ---------------------------------------------------------------- weights
+function renderWeights() {
+  $("#weights-grid").innerHTML = Object.entries(FACTOR_INFO).map(([k, [label, help]]) => `
+    <div class="w"><label for="w-${k}"><b>${label}</b><span id="wv-${k}">${Math.round(weights[k])}</span></label>
+      <input type="range" id="w-${k}" data-w="${k}" min="0" max="100" step="5" value="${weights[k]}">
+      <p>${help}</p></div>`).join("");
+}
+let saveTimer;
+function onWeight(e) {
+  const k = e.target.dataset.w; if (!k) return;
+  weights[k] = +e.target.value;
+  $(`#wv-${k}`).textContent = weights[k];
+  render();
+  refreshWhy();
+  clearTimeout(saveTimer);
+  $("#weights-status").textContent = "Saving…";
+  saveTimer = setTimeout(async () => {
+    try { await api("PUT", "/api/settings", { score_weights: weights }); $("#weights-status").textContent = "Saved."; }
+    catch (err) { $("#weights-status").textContent = `Couldn't save: ${err.message}`; }
+  }, 600);
+}
+
+function closeDrawer() {
+  state.openId = null;
+  $("#drawer").classList.remove("open"); $("#shade").classList.remove("open");
+  $("#drawer").setAttribute("aria-hidden", "true");
+  $$("tbody tr.sel").forEach(tr => tr.classList.remove("sel"));
+}
+
+async function setFlag(input) {
+  const id = state.openId, field = input.dataset.flag, value = input.checked;
+  input.disabled = true;
+  try {
+    const updated = await api("PATCH", `/api/items/${id}`, { [field]: value });
+    const idx = items.findIndex(i => i.id === id);
+    if (idx >= 0) items[idx] = { ...items[idx], ...updated };
+    window.__detail = { ...(window.__detail || {}), ...updated };
+    render();
+    refreshWhy();
+  } catch (e) { input.checked = !value; alert(`Couldn't save: ${e.message}`); }
+  finally { input.disabled = false; }
+}
+
+// ---------------------------------------------------------------- scan
+async function refreshScanStatus() {
+  const [run] = await api("GET", "/api/scans?limit=1");
+  const el = $("#scan-status"), btn = $("#scan-btn");
+  if (!run) { el.textContent = "Never scanned"; el.className = "scan-status"; btn.disabled = false; return run; }
+  const w = Object.keys(run.summary.warnings || {});
+  if (run.status === "running") { el.textContent = "Scanning…"; btn.disabled = true; }
+  else {
+    btn.disabled = false;
+    el.className = "scan-status" + (w.length ? " err" : "");
+    el.textContent = `Scanned ${ago(run.finished_at || run.started_at)}` + (w.length ? ` · ${w.join(", ")} failed` : "");
+    el.title = w.map(k => `${k}: ${run.summary.warnings[k]}`).join("\n");
+  }
+  return run;
+}
+async function scanNow() {
+  $("#scan-btn").disabled = true; $("#scan-status").textContent = "Scanning…";
+  try { await api("POST", "/api/scan"); } catch (e) { $("#scan-status").textContent = e.message; }
+  for (let i = 0; i < 600; i++) {
+    await new Promise(r => setTimeout(r, 1500));
+    const run = await refreshScanStatus().catch(() => null);
+    if (run && run.status !== "running") break;
+  }
+  await loadItems(); render();
+}
+
+// ---------------------------------------------------------------- events
+$("#kind").onclick = e => { if (e.target.dataset.kind !== undefined) { state.kind = e.target.dataset.kind; state.shown = PAGE; render(); } };
+$("#q").oninput = e => { state.q = e.target.value; state.shown = PAGE; render(); };
+$$(".chip").forEach(c => c.onclick = () => { const f = c.dataset.f; state.f.has(f) ? state.f.delete(f) : state.f.add(f); state.shown = PAGE; render(); });
+$("#tiles").onclick = e => {
+  const t = e.target.closest("[data-tile]"); if (!t) return;
+  const k = t.dataset.tile;
+  state.f.clear(); state.kind = "";
+  if (k === "movie" || k === "show") state.kind = k;
+  else if (k !== "all") state.f.add(k);
+  state.shown = PAGE; render();
+};
+$("thead").onclick = e => {
+  const th = e.target.closest("th[data-sort]"); if (!th) return;
+  const s = th.dataset.sort;
+  state.dir = state.sort === s ? -state.dir : DEFAULT_DIR[s];
+  state.sort = s; render();
+};
+$("#rows").onclick = e => { const tr = e.target.closest("tr[data-id]"); if (tr) openItem(+tr.dataset.id); };
+$("#more").onclick = () => { state.shown += PAGE; render(); };
+$("#shade").onclick = closeDrawer;
+$("#drawer").addEventListener("click", e => { if (e.target.closest("[data-close]")) closeDrawer(); });
+$("#drawer").addEventListener("change", e => { if (e.target.dataset.flag) setFlag(e.target); });
+document.addEventListener("keydown", e => { if (e.key === "Escape") closeDrawer(); });
+$("#scan-btn").onclick = scanNow;
+$("#weights-btn").onclick = () => { const w = $("#weights"); w.hidden = !w.hidden; $("#weights-btn").classList.toggle("on", !w.hidden); };
+$("#weights-grid").addEventListener("input", onWeight);
+
+(async () => {
+  try {
+    const s = await api("GET", "/api/settings");
+    lowRes = s.values.low_quality_max_resolution || 720;
+  } catch {}
+  const run = await refreshScanStatus().catch(() => null);
+  await loadItems().catch(e => { $("#empty").hidden = false; $("#empty").textContent = `Couldn't load: ${e.message}`; });
+  renderWeights();
+  render();
+  if (run && run.status === "running") scanNow();
+  setInterval(() => refreshScanStatus().catch(() => {}), 60000);
+})();
+</script>
+</body>
+</html>

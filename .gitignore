@@ -1,0 +1,9 @@
+# Local state: settings.json holds API keys/tokens, pruner.db is the scan cache. Never commit.
+data/
+.env
+
+.gradle/
+build/
+.kotlin/
+.idea/
+*.iml
