@@ -131,17 +131,31 @@ class Db(path: String) {
     fun scanRun(id: Long): ScanRun? = all(SCAN_RUNS, "WHERE id = ?", id).firstOrNull()
     fun saveScanRun(r: ScanRun) { r.id = save(SCAN_RUNS, r) }
 
+    fun removals(where: String = "", vararg args: Any?): List<Removal> = all(REMOVALS, where, *args)
+    fun removal(id: Long): Removal? = removals("WHERE id = ?", id).firstOrNull()
+    fun saveRemoval(r: Removal) { r.id = save(REMOVALS, r) }
+    fun removalTorrents(removalId: Long): List<RemovalTorrent> = all(REMOVAL_TORRENTS, "WHERE removal_id = ? ORDER BY id", removalId)
+    fun saveRemovalTorrent(t: RemovalTorrent) { t.id = save(REMOVAL_TORRENTS, t) }
+    fun audit(limit: Int, removalId: Long? = null): List<AuditEntry> =
+        if (removalId == null) all(AUDIT, "ORDER BY id DESC LIMIT ?", limit)
+        else all(AUDIT, "WHERE removal_id = ? ORDER BY id DESC LIMIT ?", removalId, limit)
+    fun addAudit(e: AuditEntry) { e.id = save(AUDIT, e) }
+
     companion object {
         val ITEMS = Table("item", Item.serializer())
         val FILES = Table("mediafile", MediaFile.serializer())
         val TORRENTS = Table("torrent", Torrent.serializer(), pk = "hash")
         val USER_PLAYS = Table("userplay", UserPlay.serializer())
         val SCAN_RUNS = Table("scanrun", ScanRun.serializer())
+        val REMOVALS = Table("removal", Removal.serializer())
+        val REMOVAL_TORRENTS = Table("removaltorrent", RemovalTorrent.serializer())
+        val AUDIT = Table("audit", AuditEntry.serializer())
 
         /** Columns added after the first release: (table, column, SQL definition) */
         val MIGRATIONS = listOf(
             Triple("item", "watched_episodes_all", "INTEGER NOT NULL DEFAULT 0"),
             Triple("userplay", "episodes_watched", "INTEGER NOT NULL DEFAULT 0"),
+            Triple("item", "plex_section_key", "VARCHAR"),
         )
 
         private val SCHEMA = listOf(
@@ -151,7 +165,7 @@ class Db(path: String) {
                 arr_path VARCHAR, arr_tags VARCHAR NOT NULL, in_plex BOOLEAN NOT NULL, plex_rating_key VARCHAR,
                 plex_added_at DATETIME, plex_view_count INTEGER NOT NULL, plex_last_viewed_at DATETIME,
                 episode_count INTEGER NOT NULL, watched_episode_count INTEGER NOT NULL,
-                watched_episodes_all INTEGER NOT NULL DEFAULT 0, play_count INTEGER NOT NULL,
+                watched_episodes_all INTEGER NOT NULL DEFAULT 0, play_count INTEGER NOT NULL, plex_section_key VARCHAR,
                 unique_viewers INTEGER NOT NULL, last_played_at DATETIME, size_bytes INTEGER NOT NULL,
                 low_quality_bytes INTEGER NOT NULL, min_resolution INTEGER, max_resolution INTEGER,
                 keep BOOLEAN NOT NULL, quality_exempt BOOLEAN NOT NULL, last_seen_scan INTEGER,
@@ -177,6 +191,21 @@ class Db(path: String) {
                 last_played_at DATETIME, episodes_watched INTEGER NOT NULL DEFAULT 0,
                 PRIMARY KEY (id), FOREIGN KEY(item_id) REFERENCES item (id))""",
             """CREATE INDEX IF NOT EXISTS ix_userplay_item_id ON userplay (item_id)""",
+            """CREATE TABLE IF NOT EXISTS removal (
+                id INTEGER NOT NULL, item_key VARCHAR NOT NULL, item_id INTEGER, kind VARCHAR NOT NULL,
+                title VARCHAR NOT NULL, year INTEGER, size_bytes INTEGER NOT NULL, state VARCHAR NOT NULL,
+                marked_at DATETIME NOT NULL, remove_after DATETIME NOT NULL, finished_at DATETIME,
+                error VARCHAR, dry_run BOOLEAN NOT NULL, PRIMARY KEY (id))""",
+            """CREATE INDEX IF NOT EXISTS ix_removal_state ON removal (state)""",
+            """CREATE INDEX IF NOT EXISTS ix_removal_item_key ON removal (item_key)""",
+            """CREATE TABLE IF NOT EXISTS removaltorrent (
+                id INTEGER NOT NULL, removal_id INTEGER NOT NULL, hash VARCHAR NOT NULL, name VARCHAR NOT NULL,
+                tracker_host VARCHAR, size INTEGER NOT NULL, state VARCHAR NOT NULL, seed_until DATETIME,
+                PRIMARY KEY (id), FOREIGN KEY(removal_id) REFERENCES removal (id))""",
+            """CREATE INDEX IF NOT EXISTS ix_removaltorrent_removal_id ON removaltorrent (removal_id)""",
+            """CREATE TABLE IF NOT EXISTS audit (
+                id INTEGER NOT NULL, at DATETIME NOT NULL, removal_id INTEGER, title VARCHAR, action VARCHAR NOT NULL,
+                detail VARCHAR NOT NULL, dry_run BOOLEAN NOT NULL, PRIMARY KEY (id))""",
         )
     }
 }

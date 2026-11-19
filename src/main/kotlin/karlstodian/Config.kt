@@ -46,6 +46,15 @@ data class Settings(
     val recency_cap_days: Int = 365,   // "not watched for this long" counts as fully stale
     val new_grace_days: Int = 60,      // titles added more recently aren't scored
 
+    // Removal (see Removal.kt)
+    val grace_days: Int = 14,              // time in Leaving Soon before a title is removed
+    val dry_run: Boolean = true,           // log what would be deleted instead of deleting
+    val cancel_on_watch: Boolean = true,   // a finished play during the grace period takes it off the list
+    val seed_min_days: Int = 14,           // keep seeding a removed title's torrent at least this long...
+    val seed_rules: Map<String, Int> = emptyMap(), // ...or this long for a tracker host: {"tracker.example": 30}
+    val leaving_soon_title: String = "Leaving Soon", // Plex collection name
+    val max_removals_per_run: Int = 25,    // safety cap per automatic run
+
     val scan_cron: String = "0 4 * * *", // nightly at 04:00; empty string disables
     val verify_ssl: Boolean = true,
     val http_timeout: Double = 60.0,
@@ -59,8 +68,20 @@ data class Settings(
         if (recency_cap_days < 1) throw SettingsError("recency_cap_days: must be at least 1 day")
         if (new_grace_days < 0) throw SettingsError("new_grace_days: can't be negative")
         if (path_maps.any { it.size != 2 }) throw SettingsError("path_maps: each entry must be [remote, local]")
-        return copy(score_weights = FACTORS.sorted().associateWith { score_weights[it] ?: 0.0 })
+        if (grace_days < 0) throw SettingsError("grace_days: can't be negative")
+        if (seed_min_days < 0) throw SettingsError("seed_min_days: can't be negative")
+        if (seed_rules.values.any { it < 0 }) throw SettingsError("seed_rules: days can't be negative")
+        if (seed_rules.keys.any { it.isBlank() }) throw SettingsError("seed_rules: tracker host can't be blank")
+        if (leaving_soon_title.isBlank()) throw SettingsError("leaving_soon_title: can't be blank")
+        if (max_removals_per_run < 1) throw SettingsError("max_removals_per_run: must be at least 1")
+        return copy(
+            score_weights = FACTORS.sorted().associateWith { score_weights[it] ?: 0.0 },
+            seed_rules = seed_rules.mapKeys { trackerHost(it.key) ?: it.key.trim().lowercase() },
+        )
     }
+
+    /** Minimum seeding time for a torrent from this tracker host. */
+    fun seedMinDays(host: String?): Int = host?.let { seed_rules[it] } ?: seed_min_days
 
     /** Translate an *arr path into a path readable from this machine (null = not mapped). */
     fun mapPath(remote: String): String? {
@@ -89,7 +110,16 @@ val SECRET_FIELDS = setOf("plex_token", "tautulli_api_key", "radarr_api_key", "s
 val GENERAL_FIELDS = listOf(
     "path_maps", "keep_tag", "quality_ok_tag", "low_quality_max_resolution", "scan_cron", "verify_ssl",
     "score_weights", "age_cap_days", "recency_cap_days", "new_grace_days",
+    "grace_days", "dry_run", "cancel_on_watch", "seed_min_days", "seed_rules", "leaving_soon_title", "max_removals_per_run",
 )
+
+/** "https://tracker.example:443/abc123passkey/announce" -> "tracker.example". Never keep the passkey. */
+fun trackerHost(tracker: String?): String? {
+    val t = tracker?.trim().orEmpty()
+    if (t.isEmpty()) return null
+    if ("://" !in t) return t.substringBefore('/').substringBefore(':').lowercase().ifEmpty { null }
+    return try { URI(t).host?.lowercase() } catch (_: Exception) { null }
+}
 val EDITABLE: List<String> = SERVICES.values.flatten() + GENERAL_FIELDS
 
 /** Holds the live settings. Everything reads `Config.current`, so a save takes effect at once. */

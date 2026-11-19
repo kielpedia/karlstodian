@@ -239,7 +239,77 @@ class ScanTest {
             }
             assertTrue("watched_episodes_all" in cols("item"))
             assertTrue("episodes_watched" in cols("userplay"))
+            assertTrue("plex_section_key" in cols("item"))
         }
+    }
+
+    @Test fun trackerPasskeyNeverStored() {
+        assertEquals("tracker.example", trackerHost("https://tracker.example:443/abc123secret/announce"))
+        assertEquals("tracker.example", trackerHost("tracker.example"))
+        assertNull(trackerHost(""))
+        env.overrides["qbit" to "/api/v2/torrents/info"] = HttpStatusCode.OK to """[{"hash": "abc123", "name": "movie.a",
+            "size": 100, "seeding_time": 1, "tracker": "https://tracker.example/s3cr3tpasskey/announce"}]"""
+        scan()
+        assertEquals("tracker.example", Store.db.torrent("abc123")!!.tracker)
+    }
+
+    @Test fun scanRemembersPlexSection() {
+        scan()
+        val items = Store.db.items()
+        assertEquals("1", items.single { it.kind == "movie" }.plex_section_key)
+        assertEquals("2", items.single { it.kind == "show" }.plex_section_key)
+    }
+
+    @Test fun removalSettingsDefaultsAndValidation() {
+        val s = Config.current
+        assertTrue(s.dry_run); assertEquals(14, s.grace_days); assertTrue(s.cancel_on_watch)
+        val merged = Config.merge(buildJsonObject {
+            putJsonObject("seed_rules") { put("https://Tracker.Example/pk/announce", 30) }
+        })
+        assertEquals(mapOf("tracker.example" to 30), merged.seed_rules)
+        assertEquals(30, merged.seedMinDays("tracker.example"))
+        assertEquals(14, merged.seedMinDays("other.example"))
+        assertEquals(14, merged.seedMinDays(null))
+        for (bad in listOf("grace_days" to -1, "seed_min_days" to -1, "max_removals_per_run" to 0)) {
+            assertFailsWith<SettingsError> { Config.merge(buildJsonObject { put(bad.first, bad.second) }) }
+        }
+        assertFailsWith<SettingsError> { Config.merge(buildJsonObject { put("leaving_soon_title", " ") }) }
+    }
+
+    @Test fun clientWriteCalls() = runBlocking {
+        RadarrClient("http://radarr", "k").use { it.unmonitor(10); it.deleteFiles(listOf(1, 2)); it.deleteFiles(emptyList()) }
+        SonarrClient("http://sonarr", "k").use { it.unmonitor(20); it.deleteFiles(listOf(5)) }
+        QbitClient("http://qbit", "u", "p").use { it.deleteWithData(listOf("abc123", "def456")) }
+        PlexClient("http://plex", "t").use { p ->
+            p.createCollection("1", "Leaving Soon", 1, "MID", listOf("900", "901"))
+            p.addToCollection("55", "MID", listOf("902"))
+            p.removeFromCollection("55", "900")
+            p.deleteCollection("55")
+        }
+        assertEquals(listOf(
+            """PUT radarr/api/v3/movie/editor {"movieIds":[10],"monitored":false}""",
+            """DELETE radarr/api/v3/moviefile/bulk {"movieFileIds":[1,2]}""",
+            """PUT sonarr/api/v3/series/editor {"seriesIds":[20],"monitored":false}""",
+            """DELETE sonarr/api/v3/episodefile/bulk {"episodeFileIds":[5]}""",
+            "POST qbit/api/v2/torrents/delete hashes=abc123|def456&deleteFiles=true",
+            "POST plex/library/collections?type=1&title=Leaving Soon&smart=0&sectionId=1&uri=server://MID/com.plexapp.plugins.library/library/metadata/900,901",
+            "PUT plex/library/collections/55/items?uri=server://MID/com.plexapp.plugins.library/library/metadata/902",
+            "DELETE plex/library/collections/55/children/900",
+            "DELETE plex/library/collections/55",
+        ), env.writes)
+    }
+
+    @Test fun removalRowsRoundTrip() {
+        val db = Store.db
+        val now = Instant.parse("2026-11-19T10:00:00Z")
+        val r = Removal(item_key = "movie:10", item_id = 1, kind = "movie", title = "Movie A", size_bytes = 100,
+            marked_at = now, remove_after = now.plus(Duration.ofDays(14)))
+        db.saveRemoval(r)
+        db.saveRemovalTorrent(RemovalTorrent(removal_id = r.id!!, hash = "abc123", name = "movie.a", tracker_host = "t"))
+        db.addAudit(AuditEntry(at = now, removal_id = r.id, title = "Movie A", action = "marked", dry_run = true))
+        assertEquals(r, db.removal(r.id!!))
+        assertEquals("abc123", db.removalTorrents(r.id!!).single().hash)
+        assertTrue(db.audit(10, r.id).single().dry_run)
     }
 
     @Test fun readsPythonEraDatetimes() {
