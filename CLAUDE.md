@@ -36,8 +36,14 @@ repo and on the server.
   Uses Python-style rounding (half-even on exact value) to match the old app.
 - `Db.kt`: plain JDBC + a small `Table` mapper over the @Serializable rows in `Models.kt`.
   Datetimes stored as naive UTC text, booleans 0/1 (SQLAlchemy's format). New columns go in `MIGRATIONS`.
-- `Main.kt`: Ktor routes, cron scheduler (cron-utils, UNIX syntax, server local time), `main`.
-- `src/main/resources/static/*.html`: plain HTML+JS, no build step.
+- `Removal.kt`: the removal workflow. `mark` puts titles in Leaving Soon (grace period, Plex
+  collection per library section via `syncLeavingSoon`); `processDue` (hourly + after each scan)
+  cancels watched/protected ones, removes due ones (Radarr/Sonarr unmonitor + delete files, then
+  torrents with data once seeded `seed_min_days`/`seed_rules`), and finishes seeding torrents.
+  Dry run (default on) only writes "would ..." audit lines. Tables `removal`, `removaltorrent`, `audit`.
+  Tracker URLs carry passkeys: only the host is ever stored (`trackerHost`).
+- `Main.kt`: Ktor routes, cron scheduler (cron-utils, UNIX syntax, server local time), hourly removal timer, `main`.
+- `src/main/resources/static/*.html`: Library, Removals, Settings. Plain HTML+JS, no build step.
 
 Keep the `PRUNER_*` env prefix and `data/pruner.db` - renaming would orphan existing data.
 
@@ -71,9 +77,14 @@ Keep the `PRUNER_*` env prefix and `data/pruner.db` - renaming would orphan exis
 - Runs in **its own Debian LXC** (only that LXC needs a JVM), LAN-only behind the owner's Caddy,
   no login (owner's choice). The owner runs all server commands; give exact commands.
 
+- Removal: the owner picks titles (no auto-selection); 14-day grace in a Leaving Soon Plex
+  collection; automatic removal when it ends, plus "Remove now"; a finished play during the grace
+  period keeps it; torrents are deleted only after their seed time.
+
 ## Next
 
-1. Media share for hardlink accounting (read-only NFS bind mount into the LXC; set Path mappings).
-2. Milestone 2: reclaimable space per title from (dev, inode, nlink).
-3. Milestone 5: removal workflow.
-4. Stretch: seed-time guard; per-user views; "not in Plex" fix-up.
+1. Removal workflow shipped in PRs #2-#4 (Nov 2026) with dry run on. Owner checks the log on the
+   server, then turns dry run off and removes one title by hand first.
+2. Reclaimable space (milestone 2) was measured and dropped: deleting title + torrent frees ~ the
+   shown size. Inode data is collected (media share mounted read-only at /mnt in the server's LXC).
+3. Stretch: per-user views; "not in Plex" fix-up; "free X TB" helper for picking titles.
