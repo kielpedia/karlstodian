@@ -74,7 +74,7 @@ object Scheduler {
                 nextRun = next
                 delay(java.time.Duration.between(ZonedDateTime.now(), next).toMillis().coerceAtLeast(0))
                 try {
-                    runScan()
+                    scanAndFollowUp()
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Exception) {
@@ -107,12 +107,23 @@ private fun inputOf(i: Item, cfg: Settings): ScoreInput {
     return ScoreInput(i, i.keep || cfg.keep_tag in tags, i.quality_exempt || cfg.quality_ok_tag in tags)
 }
 
-/** An item as the API returns it: its columns, tags as a list, effective flags and its score. */
-private fun itemOut(input: ScoreInput, score: Score): JsonObject {
+/** Protected by the app flag or the keep tag in Radarr/Sonarr. */
+fun keepEffective(i: Item, cfg: Settings): Boolean = inputOf(i, cfg).keepEffective
+
+/** A removal as the API returns it (with its torrents). */
+fun removalOut(r: Removal, db: Db = Store.db): JsonObject =
+    JsonObject(json.encodeToJsonElement(Removal.serializer(), r).jsonObject +
+        ("torrents" to json.encodeToJsonElement(db.removalTorrents(r.id!!))))
+
+/** An item as the API returns it: its columns, tags as a list, effective flags, its score and removal status. */
+private fun itemOut(input: ScoreInput, score: Score, removal: Removal?): JsonObject {
     val base = json.encodeToJsonElement(Item.serializer(), input.item).jsonObject.toMutableMap()
     base["arr_tags"] = JsonArray(tagsOf(input.item).map(::JsonPrimitive))
     base["keep_effective"] = JsonPrimitive(input.keepEffective)
     base["quality_exempt_effective"] = JsonPrimitive(input.qualityExemptEffective)
+    base["removal"] = removal?.let {
+        buildJsonObject { put("id", it.id); put("state", it.state); put("remove_after", it.remove_after.toString()) }
+    } ?: JsonNull
     val s = json.encodeToJsonElement(Score.serializer(), score).jsonObject
     return JsonObject(base + s)
 }
@@ -121,7 +132,14 @@ private fun itemOut(input: ScoreInput, score: Score): JsonObject {
 fun scoredItems(db: Db = Store.db, cfg: Settings = Config.current): List<JsonObject> {
     val inputs = db.items().map { inputOf(it, cfg) }
     val scores = scoreItems(inputs, cfg)
-    return inputs.map { itemOut(it, scores.getValue(it.item.id!!)) }
+    val leaving = Removals.activeByItem(db)
+    return inputs.map { itemOut(it, scores.getValue(it.item.id!!), leaving[it.item.id]) }
+}
+
+/** A scan, then the removal follow-ups (Leaving Soon collection sync). */
+suspend fun scanAndFollowUp() {
+    runScan()
+    Removals.afterScan()
 }
 
 @Suppress("UNCHECKED_CAST")
@@ -212,7 +230,7 @@ fun Application.module() {
         post("/api/scan") {
             if (scanLock.isLocked) return@post call.respond(HttpStatusCode.Accepted, buildJsonObject { put("status", "already_running") })
             this@module.launch {
-                try { runScan() } catch (e: Exception) { log.error("scan failed", e) }
+                try { scanAndFollowUp() } catch (e: Exception) { log.error("scan failed", e) }
             }
             call.respond(HttpStatusCode.Accepted, buildJsonObject { put("status", "started") })
         }
@@ -270,7 +288,50 @@ fun Application.module() {
             flag("keep")?.let { item.keep = it }
             flag("quality_exempt")?.let { item.quality_exempt = it }
             db.saveItem(item)
+            if (item.keep && Removals.activeByItem(db)[id]?.state == "leaving") {
+                Removals.cancelForItem(id, "Protected by the owner")
+                this@module.launch { Removals.syncSafely() }
+            }
             call.respond(scoredItems(db).first { it.long("id") == id })
+        }
+
+        // removals
+        get("/api/removals") {
+            val db = Store.db
+            val which = call.request.queryParameters["state"] ?: "active"
+            val rows = when (which) {
+                "active" -> Removals.active(db)
+                "history" -> db.removals("WHERE state NOT IN ('leaving','removing','waiting_seed') ORDER BY COALESCE(finished_at, marked_at) DESC, id DESC LIMIT 500")
+                "all" -> db.removals("ORDER BY id DESC LIMIT 1000")
+                else -> throw HttpError(HttpStatusCode.UnprocessableEntity, "state must be active, history or all")
+            }
+            val cfg = Config.current
+            call.respond(buildJsonObject {
+                put("dry_run", cfg.dry_run)
+                put("grace_days", cfg.grace_days)
+                put("plex_sync_error", Removals.plexSyncError)
+                put("removals", JsonArray(rows.map { removalOut(it, db) }))
+            })
+        }
+
+        /** Put titles on the Leaving Soon list: {"item_ids": [1, 2]} */
+        post("/api/removals") {
+            val ids = (call.body()["item_ids"] as? JsonArray)?.map {
+                it.jsonPrimitive.longOrNull ?: throw HttpError(HttpStatusCode.UnprocessableEntity, "item_ids must be numbers")
+            } ?: throw HttpError(HttpStatusCode.UnprocessableEntity, "item_ids is required")
+            val res = Removals.mark(ids)
+            if (res.marked.isNotEmpty()) this@module.launch { Removals.syncSafely() }
+            call.respond(buildJsonObject {
+                put("marked", JsonArray(res.marked.map { removalOut(it) }))
+                put("refused", JsonObject(res.refused.mapKeys { it.key.toString() }.mapValues { JsonPrimitive(it.value) }))
+            })
+        }
+
+        /** Keep it after all: take it off the list. */
+        delete("/api/removals/{id}") {
+            val r = Removals.cancel(itemId(call), "Kept by the owner")
+            this@module.launch { Removals.syncSafely() }
+            call.respond(removalOut(r))
         }
     }
 }

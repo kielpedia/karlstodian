@@ -104,6 +104,28 @@
       <p class="help">Scoring thresholds. Factor weights are set with the sliders on the Library page.</p>
     </div>
   </div>
+
+  <h2>Removal</h2>
+  <div class="grid">
+    <div class="card">
+      <label class="check"><input type="checkbox" data-field="dry_run"> Dry run: only log what would be deleted</label>
+      <p class="help">Leave this on until you've checked a few removals in the log. With it off, files and torrents are really deleted.</p>
+      <label>Grace period (days in Leaving Soon) <input type="number" data-field="grace_days" min="0" step="1"></label>
+      <label class="check"><input type="checkbox" data-field="cancel_on_watch"> Keep a title if anyone finishes watching it during the grace period</label>
+    </div>
+    <div class="card">
+      <label>Plex collection name <input type="text" data-field="leaving_soon_title"></label>
+      <label>Most titles removed per automatic run <input type="number" data-field="max_removals_per_run" min="1" step="1"></label>
+      <p class="help">A safety cap; anything over it waits for the next run (hourly).</p>
+    </div>
+    <div class="card">
+      <label>Keep seeding at least (days) <input type="number" data-field="seed_min_days" min="0" step="1"></label>
+      <label>Per tracker (one per line: <code>tracker host = days</code>)
+        <textarea data-field="seed_rules" rows="3" placeholder="tracker.example = 30"></textarea>
+      </label>
+      <p class="help">After a title is removed, its torrent keeps seeding until it reaches this seeding time, then it's deleted with its data.</p>
+    </div>
+  </div>
 </div>
 
 <div class="bar"><div class="inner">
@@ -150,6 +172,16 @@ function renderServices() {
 }
 
 const pathMapsToText = pm => (pm || []).map(([a, b]) => `${a} => ${b}`).join("\n");
+const seedRulesToText = r => Object.entries(r || {}).map(([h, d]) => `${h} = ${d}`).join("\n");
+function textToSeedRules(t) {
+  const out = {};
+  for (const l of t.split("\n").map(l => l.trim()).filter(Boolean)) {
+    const m = l.match(/^(.+?)\s*[=:]\s*(\d+)$/);
+    if (!m) throw new Error(`Seed rule "${l}" should look like  tracker.example = 30`);
+    out[m[1].trim()] = Number(m[2]);
+  }
+  return out;
+}
 function textToPathMaps(t) {
   return t.split("\n").map(l => l.trim()).filter(Boolean).map(l => {
     const parts = l.split(/\s*(?:=>|->|→)\s*/);
@@ -169,6 +201,7 @@ function fill() {
       const btn = $(`[data-clear="${f}"]`); if (btn) btn.hidden = !(v && v.set) || clears.has(f);
     } else if (el.type === "checkbox") el.checked = !!v;
     else if (f === "path_maps") el.value = pathMapsToText(v);
+    else if (f === "seed_rules") el.value = seedRulesToText(v);
     else el.value = v ?? "";
   }
   updateBar();
@@ -179,6 +212,7 @@ function readField(el) {
   if (el.type === "checkbox") return el.checked;
   if (el.type === "number") return el.value === "" ? null : Number(el.value);
   if (f === "path_maps") return textToPathMaps(el.value);
+  if (f === "seed_rules") return textToSeedRules(el.value);
   return el.value;
 }
 
@@ -186,6 +220,7 @@ function isDirty(el) {
   const f = el.dataset.field;
   if (SECRETS.has(f)) return el.value !== "";
   if (f === "path_maps") return el.value.trim() !== pathMapsToText(saved[f]);
+  if (f === "seed_rules") return el.value.trim() !== seedRulesToText(saved[f]);
   if (el.type === "checkbox") return el.checked !== !!saved[f];
   return String(el.value) !== String(saved[f] ?? "");
 }
