@@ -30,6 +30,7 @@
   /* top bar */
   .top { display: flex; align-items: center; gap: 20px; flex-wrap: wrap; margin-bottom: 22px; }
   .brand { font-weight: 700; font-size: 20px; letter-spacing: -0.01em; }
+  .brand .ver { color: var(--muted); font-weight: 400; font-size: 12px; letter-spacing: 0; }
   nav { display: flex; gap: 4px; }
   nav a { color: var(--muted); text-decoration: none; padding: 5px 11px; border-radius: 7px; font-size: 14px; }
   nav a:hover { color: var(--ink); background: var(--idle-bg); }
@@ -170,7 +171,7 @@
 <body>
 <div class="wrap">
   <div class="top">
-    <span class="brand">Karlstodian</span>
+    <span class="brand">Karlstodian <span class="ver" id="app-version"></span></span>
     <nav><a href="/library" class="on">Library</a><a href="/settings">Settings</a></nav>
     <div class="scan">
       <span class="scan-status" id="scan-status">…</span>
@@ -219,6 +220,7 @@
 <aside class="drawer" id="drawer" aria-hidden="true"></aside>
 
 <script>
+fetch('/healthz').then(r => r.json()).then(j => { document.getElementById('app-version').textContent = j.version; }).catch(() => {});
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));

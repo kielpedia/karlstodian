@@ -39,6 +39,16 @@ ktor { fatJar { archiveFileName.set("karlstodian.jar") } }
 
 tasks.test { useJUnitPlatform() }
 
+// Release name baked into the jar (CI passes -PappVersion=build-<n>); shown by /healthz and the pages
+val appVersion = (findProperty("appVersion") as String?)?.takeIf { it.isNotBlank() } ?: "dev"
+val writeVersion by tasks.registering {
+    val out = layout.buildDirectory.dir("generated/version")
+    inputs.property("appVersion", appVersion)
+    outputs.dir(out)
+    doLast { out.get().file("karlstodian-version.txt").asFile.writeText(appVersion) }
+}
+sourceSets.main { resources.srcDir(writeVersion) }
+
 // build/karlstodian-deploy.tgz: jar + installer (+ data/ if present) for the LXC. Holds your API keys.
 tasks.register<Tar>("deployBundle") {
     dependsOn("buildFatJar")
