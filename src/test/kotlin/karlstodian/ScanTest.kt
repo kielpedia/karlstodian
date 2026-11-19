@@ -70,6 +70,13 @@ class ScanTest {
         assertEquals("Movie A", Store.db.items().single { it.kind == "movie" }.title)
     }
 
+    @Test fun healthReportsVersion() = withApp {
+        val h = client.get("/healthz").obj()
+        assertEquals(true, h["ok"]!!.jsonPrimitive.boolean)
+        assertEquals(APP_VERSION, h.str("version"))
+        assertTrue(APP_VERSION.isNotBlank())
+    }
+
     @Test fun api() = withApp {
         scan()
         val items = client.get("/api/items?sort=size").obj()

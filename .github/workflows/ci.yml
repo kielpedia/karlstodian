@@ -48,7 +48,7 @@ jobs:
           distribution: temurin
           java-version: "21"
       - uses: gradle/actions/setup-gradle@v6
-      - run: ./gradlew buildFatJar --console=plain
+      - run: ./gradlew buildFatJar --console=plain -PappVersion=build-${{ github.run_number }}
       - name: Checksum
         working-directory: build/libs
         run: sha256sum karlstodian.jar > karlstodian.jar.sha256

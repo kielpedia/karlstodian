@@ -68,7 +68,7 @@
 <body>
 <div class="wrap">
   <header>
-    <h1>Karlstodian</h1>
+    <h1>Karlstodian <span id="app-version" style="font-size:12px"></span></h1>
     <nav><a href="/library">Library</a><a href="/settings" class="on">Settings</a></nav>
     <p>Where each service lives and how to sign in to it. Saved keys never leave the server — leave a key field blank to keep it.</p>
   </header>
@@ -115,6 +115,7 @@
 </div></div>
 
 <script>
+fetch('/healthz').then(r => r.json()).then(j => { document.getElementById('app-version').textContent = j.version; }).catch(() => {});
 const SERVICES = [
   { id: "plex", name: "Plex", fields: [["plex_url", "URL", "http://192.168.1.10:32400"], ["plex_token", "Token"]],
     help: "Token: Plex Web → any item → ⋯ → Get Info → View XML; it's X-Plex-Token in the URL." },

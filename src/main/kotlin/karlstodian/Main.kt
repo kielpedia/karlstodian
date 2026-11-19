@@ -27,6 +27,10 @@ import kotlin.jvm.optionals.getOrNull
 
 private val log = LoggerFactory.getLogger("karlstodian")
 
+/** Release this jar was built as (CI stamps "build-<n>"), or "dev" for local builds. */
+val APP_VERSION: String = object {}.javaClass.getResource("/karlstodian-version.txt")
+    ?.readText()?.trim()?.ifBlank { null } ?: "dev"
+
 /** The open database. Tests call reset() after pointing PRUNER_DB_PATH somewhere else. */
 object Store {
     @Volatile private var opened: Db? = null
@@ -173,7 +177,7 @@ fun Application.module() {
                 call.respondText(page("$p.html"), ContentType.Text.Html)
             }
         }
-        get("/healthz") { call.respond(buildJsonObject { put("ok", true) }) }
+        get("/healthz") { call.respond(buildJsonObject { put("ok", true); put("version", APP_VERSION) }) }
 
         // settings
         get("/api/settings") { call.respond(settingsOut()) }
@@ -278,6 +282,6 @@ fun main(args: Array<String>) {
     }
     val host = System.getenv("PRUNER_HOST") ?: "127.0.0.1"
     val port = System.getenv("PRUNER_PORT")?.toIntOrNull() ?: 8000
-    log.info("Karlstodian on http://$host:$port")
+    log.info("Karlstodian $APP_VERSION on http://$host:$port")
     embeddedServer(CIO, host = host, port = port, module = Application::module).start(wait = true)
 }
