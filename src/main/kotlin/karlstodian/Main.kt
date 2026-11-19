@@ -251,7 +251,7 @@ fun Application.module() {
             val hashes = files.mapNotNull { it.torrent_hash }.toSet()
             call.respond(JsonObject(scored + mapOf(
                 "files" to json.encodeToJsonElement(files),
-                "torrents" to json.encodeToJsonElement(db.torrents(hashes)),
+                "torrents" to json.encodeToJsonElement(db.torrents(hashes).map { it.copy(tracker = trackerHost(it.tracker)) }),
                 "user_plays" to json.encodeToJsonElement(db.userPlays(id)),
             )))
         }

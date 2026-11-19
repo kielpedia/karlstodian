@@ -8,6 +8,7 @@ import io.ktor.client.request.*
 import io.ktor.client.request.forms.*
 import io.ktor.client.statement.*
 import io.ktor.http.*
+import io.ktor.http.content.*
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -67,6 +68,17 @@ abstract class ServiceClient(
         return json.parseToJsonElement(r.bodyAsText())
     }
 
+    /** POST/PUT/DELETE with an optional JSON body. Returns the response text (often empty). */
+    open suspend fun send(
+        method: HttpMethod, path: String, query: Map<String, Any?> = emptyMap(),
+        body: JsonElement? = null, extraHeaders: Map<String, String> = emptyMap(),
+    ): String = http.request {
+        this.method = method
+        defaults(path, query)
+        extraHeaders.forEach { (k, v) -> header(k, v) }
+        if (body != null) setBody(TextContent(body.toString(), ContentType.Application.Json))
+    }.bodyAsText()
+
     override fun close() = http.close()
 }
 
@@ -76,6 +88,46 @@ class PlexClient(url: String, token: String, verify: Boolean? = null, timeout: D
 
     suspend fun identity(): JsonObject = get("/identity").obj.child("MediaContainer")!!
     suspend fun sections(): List<JsonObject> = get("/library/sections").obj.child("MediaContainer")?.get("Directory").arr.map { it.jsonObject }
+
+    suspend fun machineId(): String = identity().str("machineIdentifier")
+        ?: throw IllegalStateException("Plex didn't report its machineIdentifier")
+
+    /** Collections in a library section: title -> ratingKey. */
+    suspend fun collections(sectionKey: String): Map<String, String> =
+        get("/library/sections/$sectionKey/collections").obj.child("MediaContainer")?.get("Metadata").arr
+            .mapNotNull { m -> m.obj.str("title")?.let { t -> m.obj.str("ratingKey")?.let { t to it } } }.toMap()
+
+    /** Rating keys of the items in a collection. */
+    suspend fun collectionItems(collectionKey: String): Set<String> =
+        get("/library/collections/$collectionKey/children").obj.child("MediaContainer")?.get("Metadata").arr
+            .mapNotNull { it.obj.str("ratingKey") }.toSet()
+
+    private fun itemsUri(machineId: String, ratingKeys: Collection<String>) =
+        "server://$machineId/com.plexapp.plugins.library/library/metadata/${ratingKeys.joinToString(",")}"
+
+    /** Creates a regular (non-smart) collection holding [ratingKeys]; type 1 = movies, 2 = shows. */
+    suspend fun createCollection(sectionKey: String, title: String, type: Int, machineId: String, ratingKeys: Collection<String>) {
+        send(HttpMethod.Post, "/library/collections", mapOf(
+            "type" to type, "title" to title, "smart" to 0, "sectionId" to sectionKey, "uri" to itemsUri(machineId, ratingKeys),
+        ))
+    }
+
+    suspend fun addToCollection(collectionKey: String, machineId: String, ratingKeys: Collection<String>) {
+        send(HttpMethod.Put, "/library/collections/$collectionKey/items", mapOf("uri" to itemsUri(machineId, ratingKeys)))
+    }
+
+    suspend fun removeFromCollection(collectionKey: String, ratingKey: String) {
+        send(HttpMethod.Delete, "/library/collections/$collectionKey/children/$ratingKey")
+    }
+
+    suspend fun deleteCollection(collectionKey: String) {
+        send(HttpMethod.Delete, "/library/collections/$collectionKey")
+    }
+
+    /** Ask Plex to rescan a library section (after files were deleted). */
+    suspend fun refreshSection(sectionKey: String) {
+        get("/library/sections/$sectionKey/refresh")
+    }
 
     /** All top-level items (movies or shows) in a library, paged. */
     suspend fun sectionItems(sectionKey: String): List<JsonObject> {
@@ -141,6 +193,26 @@ abstract class ArrClient(url: String, apiKey: String, verify: Boolean?, timeout:
     ServiceClient(url, defaultHeaders = mapOf("X-Api-Key" to apiKey), verify = verify, timeout = timeout) {
 
     suspend fun systemStatus(): JsonObject = get("/api/v3/system/status").jsonObject
+
+    /** The movie / series, or null when it no longer exists. */
+    abstract suspend fun find(id: Long): JsonObject?
+    /** Ids of the movie's / series' current files. */
+    abstract suspend fun fileIds(id: Long): List<Long>
+    /** Stop searching for it, keeping the entry. */
+    abstract suspend fun unmonitor(id: Long)
+    /** Delete files from disk (through Radarr/Sonarr, so their database stays in step). */
+    abstract suspend fun deleteFiles(fileIds: List<Long>)
+
+    protected suspend fun findAt(path: String): JsonObject? = try {
+        get(path).jsonObject
+    } catch (e: ClientRequestException) {
+        if (e.response.status == HttpStatusCode.NotFound) null else throw e
+    }
+
+    protected fun idsBody(field: String, ids: List<Long>, extra: JsonObjectBuilder.() -> Unit = {}) = buildJsonObject {
+        putJsonArray(field) { ids.forEach { add(it) } }
+        extra()
+    }
     suspend fun tags(): Map<Long, String> = get("/api/v3/tag").arr.associate { it.obj.long("id")!! to (it.obj.str("label") ?: "") }
 
     /** All "imported from download client" history records. Each carries the torrent hash
@@ -170,6 +242,16 @@ class RadarrClient(url: String, apiKey: String, verify: Boolean? = null, timeout
     ArrClient(url, apiKey, verify, timeout) {
     override val name = "radarr"
     suspend fun movies(): List<JsonObject> = get("/api/v3/movie").arr.map { it.jsonObject }
+
+    override suspend fun find(id: Long) = findAt("/api/v3/movie/$id")
+    override suspend fun fileIds(id: Long): List<Long> =
+        get("/api/v3/moviefile", mapOf("movieId" to id)).arr.mapNotNull { it.obj.long("id") }
+    override suspend fun unmonitor(id: Long) {
+        send(HttpMethod.Put, "/api/v3/movie/editor", body = idsBody("movieIds", listOf(id)) { put("monitored", false) })
+    }
+    override suspend fun deleteFiles(fileIds: List<Long>) {
+        if (fileIds.isNotEmpty()) send(HttpMethod.Delete, "/api/v3/moviefile/bulk", body = idsBody("movieFileIds", fileIds))
+    }
 }
 
 class SonarrClient(url: String, apiKey: String, verify: Boolean? = null, timeout: Double? = null) :
@@ -178,6 +260,15 @@ class SonarrClient(url: String, apiKey: String, verify: Boolean? = null, timeout
     suspend fun series(): List<JsonObject> = get("/api/v3/series").arr.map { it.jsonObject }
     suspend fun episodeFiles(seriesId: Long): List<JsonObject> =
         get("/api/v3/episodefile", mapOf("seriesId" to seriesId)).arr.map { it.jsonObject }
+
+    override suspend fun find(id: Long) = findAt("/api/v3/series/$id")
+    override suspend fun fileIds(id: Long): List<Long> = episodeFiles(id).mapNotNull { it.long("id") }
+    override suspend fun unmonitor(id: Long) {
+        send(HttpMethod.Put, "/api/v3/series/editor", body = idsBody("seriesIds", listOf(id)) { put("monitored", false) })
+    }
+    override suspend fun deleteFiles(fileIds: List<Long>) {
+        if (fileIds.isNotEmpty()) send(HttpMethod.Delete, "/api/v3/episodefile/bulk", body = idsBody("episodeFileIds", fileIds))
+    }
 
     /** Episode files for every series, 8 requests at a time. */
     suspend fun episodeFilesFor(series: List<JsonObject>): Map<Long, List<JsonObject>> = coroutineScope {
@@ -221,4 +312,19 @@ class QbitClient(url: String, private val username: String, private val password
     }
 
     suspend fun torrents(): List<JsonObject> = get("/api/v2/torrents/info").arr.map { it.jsonObject }
+
+    /** Live info for specific torrents (missing hashes are simply absent). */
+    suspend fun torrents(hashes: Collection<String>): List<JsonObject> =
+        if (hashes.isEmpty()) emptyList()
+        else get("/api/v2/torrents/info", mapOf("hashes" to hashes.joinToString("|"))).arr.map { it.jsonObject }
+
+    /** Remove torrents together with their downloaded data. */
+    suspend fun deleteWithData(hashes: Collection<String>) {
+        if (hashes.isEmpty()) return
+        if (!loggedIn) login()
+        http.submitForm(
+            url = "$base/api/v2/torrents/delete",
+            formParameters = parameters { append("hashes", hashes.joinToString("|")); append("deleteFiles", "true") },
+        ) { header("Referer", base); cookieHeader().forEach { (k, v) -> header(k, v) } }
+    }
 }

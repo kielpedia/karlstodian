@@ -28,6 +28,7 @@ data class Item(
     // Plex
     var in_plex: Boolean = false,
     var plex_rating_key: String? = null,
+    var plex_section_key: String? = null, // library section, for the Leaving Soon collection
     var plex_added_at: Instant? = null,
     var plex_view_count: Int = 0,
     var plex_last_viewed_at: Instant? = null,
@@ -96,6 +97,53 @@ data class UserPlay(
     var plays: Int = 0,
     var episodes_watched: Int = 0, // distinct episodes finished (shows)
     var last_played_at: Instant? = null,
+)
+
+/**
+ * A title on its way out: marked by the owner, waits out the grace period in the Leaving Soon
+ * collection, then gets removed. Title/key are copied in because the item row disappears
+ * after removal. state: leaving | removing | waiting_seed | done | cancelled | failed
+ */
+@Serializable
+data class Removal(
+    var id: Long? = null,
+    var item_key: String,
+    var item_id: Long? = null,
+    var kind: String,
+    var title: String,
+    var year: Int? = null,
+    var size_bytes: Long = 0,
+    var state: String = "leaving",
+    var marked_at: Instant,
+    var remove_after: Instant,
+    var finished_at: Instant? = null,
+    var error: String? = null,
+    var dry_run: Boolean = false,
+)
+
+/** A torrent belonging to a removal. state: pending (seeding until seed_until) | deleted | kept_shared | gone */
+@Serializable
+data class RemovalTorrent(
+    var id: Long? = null,
+    var removal_id: Long,
+    var hash: String,
+    var name: String,
+    var tracker_host: String? = null,
+    var size: Long = 0,
+    var state: String = "pending",
+    var seed_until: Instant? = null,
+)
+
+/** One line of the removal audit log. */
+@Serializable
+data class AuditEntry(
+    var id: Long? = null,
+    var at: Instant,
+    var removal_id: Long? = null,
+    var title: String? = null,
+    var action: String,
+    var detail: String = "",
+    var dry_run: Boolean = false,
 )
 
 @Serializable

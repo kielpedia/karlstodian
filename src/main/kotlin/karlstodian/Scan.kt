@@ -85,13 +85,17 @@ private suspend fun fetchPlex(s: Settings): PlexData {
         val shows = mutableListOf<JsonObject>()
         for (sec in c.sections()) {
             when (sec.str("type")) {
-                "movie" -> movies += c.sectionItems(sec.str("key")!!)
-                "show" -> shows += c.sectionItems(sec.str("key")!!)
+                "movie" -> movies += c.sectionItems(sec.str("key")!!).map { it.withSection(sec) }
+                "show" -> shows += c.sectionItems(sec.str("key")!!).map { it.withSection(sec) }
             }
         }
         PlexData(movies, shows)
     }
 }
+
+/** Remember which library section an item came from (the Leaving Soon collection is per section). */
+private fun JsonObject.withSection(sec: JsonObject) = JsonObject(this + (SECTION to JsonPrimitive(sec.str("key"))))
+private const val SECTION = "_karlstodian_section"
 
 private suspend fun fetchTautulli(s: Settings): List<JsonObject> =
     if (s.tautulli_url.isEmpty()) emptyList()
@@ -195,6 +199,7 @@ private fun applyPlex(item: Item, meta: JsonObject?, plays: Map<String, PlayStat
     item.in_plex = meta != null
     if (meta == null) {
         item.plex_rating_key = null
+        item.plex_section_key = null
         item.plex_added_at = null
         item.plex_view_count = 0
         item.plex_last_viewed_at = null
@@ -207,6 +212,7 @@ private fun applyPlex(item: Item, meta: JsonObject?, plays: Map<String, PlayStat
     }
     val rk = meta.str("ratingKey")
     item.plex_rating_key = rk
+    item.plex_section_key = meta.str(SECTION)
     item.plex_added_at = epoch(meta["addedAt"])
     item.plex_view_count = meta.int("viewCount") ?: 0
     item.plex_last_viewed_at = epoch(meta["lastViewedAt"])
@@ -378,7 +384,7 @@ private suspend fun doScan(db: Db, cfg: Settings): JsonObject {
                 save(Db.TORRENTS, Torrent(
                     hash = t.str("hash")!!.lowercase(), name = t.str("name") ?: "", size = t.long("size") ?: 0,
                     ratio = t.double("ratio") ?: 0.0, seeding_time = t.long("seeding_time") ?: 0,
-                    tracker = t.str("tracker")?.ifEmpty { null }, category = t.str("category")?.ifEmpty { null },
+                    tracker = trackerHost(t.str("tracker")), // host only: the URL carries the passkey category = t.str("category")?.ifEmpty { null },
                     state = t.str("state"), added_on = epoch(t["added_on"]), content_path = t.str("content_path"),
                 ))
             }

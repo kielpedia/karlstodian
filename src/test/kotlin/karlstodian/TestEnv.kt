@@ -1,7 +1,9 @@
 package karlstodian
 
 import io.ktor.client.engine.mock.*
+import io.ktor.client.request.forms.*
 import io.ktor.http.*
+import io.ktor.http.content.*
 import java.nio.file.Files
 import java.nio.file.Path
 
@@ -12,6 +14,9 @@ class TestEnv {
     var radarrOk = true
     /** Extra handlers checked before the standard ones: (host, path) -> response */
     val overrides = mutableMapOf<Pair<String, String>, Pair<HttpStatusCode, String>>()
+
+    /** Every request that changed something (not GET), as "METHOD host/path?query body". */
+    val writes = mutableListOf<String>()
 
     init {
         Files.createDirectories(media.resolve("torrents"))
@@ -38,6 +43,15 @@ class TestEnv {
         ))
         Http.engineOverride = MockEngine { req ->
             val key = req.url.host to req.url.encodedPath
+            if (req.method != HttpMethod.Get && key.second != "/api/v2/auth/login") {
+                val body = when (val b = req.body) {
+                    is TextContent -> b.text
+                    is FormDataContent -> b.formData.entries().joinToString("&") { (k, v) -> "$k=${v.joinToString(",")}" }
+                    else -> ""
+                }
+                val q = req.url.encodedQuery.let { if (it.isEmpty()) "" else "?" + it.decodeURLQueryComponent(plusIsSpace = true) }
+                synchronized(writes) { writes += "${req.method.value} ${key.first}${key.second}$q $body".trim() }
+            }
             val (status, body) = overrides[key] ?: respond(key.first, key.second, req.method)
             respond(body, status, headersOf(HttpHeaders.ContentType, "application/json"))
         }
@@ -74,7 +88,7 @@ class TestEnv {
             "qbit/api/v2/auth/login" -> ok to "Ok."
             "qbit/api/v2/torrents/info" -> ok to """[{"hash": "abc123", "name": "movie.a", "size": 100, "ratio": 1.5,
                 "seeding_time": 86400, "tracker": "https://t/announce", "added_on": 1600000000}]"""
-            else -> HttpStatusCode.NotFound to "{}"
+            else -> if (method != HttpMethod.Get) ok to "" else HttpStatusCode.NotFound to "{}" // writes succeed by default
         }
     }
 
