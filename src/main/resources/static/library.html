@@ -44,7 +44,7 @@
   .btn:disabled { opacity: .55; cursor: default; }
 
   /* tiles */
-  .tiles { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; margin-bottom: 20px; }
+  .tiles { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 12px; margin-bottom: 20px; }
   .tile { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; text-align: left; cursor: pointer; }
   .tile:hover { border-color: var(--muted); }
   .tile.on { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
@@ -152,6 +152,23 @@
   .muted { color: var(--muted); font-size: 13px; }
   details summary { cursor: pointer; color: var(--accent); font-size: 13px; font-weight: 600; margin-bottom: 8px; }
 
+  /* removal */
+  th.ck, td.ck { width: 34px; padding-right: 0; cursor: default; }
+  td.ck input, th.ck input { width: 16px; height: 16px; accent-color: var(--accent); cursor: pointer; }
+  td.ck input:disabled { cursor: default; opacity: .35; }
+  .badge.leave { background: var(--err-bg); color: var(--err); }
+  .selbar { position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%); display: flex; align-items: center; gap: 14px;
+            background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px 10px 18px;
+            box-shadow: 0 6px 24px rgba(0,0,0,.18); z-index: 5; max-width: calc(100vw - 32px); flex-wrap: wrap; }
+  .selbar b { font-variant-numeric: tabular-nums; }
+  .btn.danger { background: var(--err); color: #fff; border-color: var(--err); }
+  .leavebox { border: 1px solid var(--err); background: var(--err-bg); border-radius: 9px; padding: 12px 14px; margin-top: 14px; }
+  .leavebox b { color: var(--err); }
+  .leavebox .row { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+  .markbox { display: flex; align-items: center; justify-content: space-between; gap: 12px; border: 1px solid var(--line); border-radius: 9px; padding: 10px 12px; margin-top: 8px; }
+  .markbox span { font-size: 13px; color: var(--muted); }
+  .banner { background: var(--warn-bg); color: var(--warn); border-radius: 9px; padding: 9px 14px; font-size: 13px; margin-bottom: 14px; }
+
   @media (max-width: 980px) {
     .tiles { grid-template-columns: repeat(3, minmax(0, 1fr)); }
     .col-added { display: none; }
@@ -179,6 +196,7 @@
     </div>
   </div>
 
+  <div class="banner" id="banner" hidden></div>
   <div class="tiles" id="tiles"></div>
 
   <div class="filters">
@@ -190,6 +208,7 @@
     <button class="chip" data-f="lowq">Low quality</button>
     <button class="chip" data-f="noplex">Not in Plex</button>
     <button class="chip" data-f="kept">Protected / exempt</button>
+    <button class="chip" data-f="leaving">Leaving Soon</button>
     <button class="chip" id="weights-btn">Scoring weights</button>
   </div>
   <div class="weights" id="weights" hidden>
@@ -201,6 +220,7 @@
   <div class="tablewrap">
     <table>
       <thead><tr>
+        <th class="ck"><input type="checkbox" id="ck-all" title="Select all shown" aria-label="Select all shown"></th>
         <th data-sort="title">Title<span class="arr"></span></th>
         <th data-sort="score" class="num">Score<span class="arr"></span></th>
         <th data-sort="size" class="num">Size<span class="arr"></span></th>
@@ -216,6 +236,12 @@
   </div>
 </div>
 
+<div class="selbar" id="selbar" hidden>
+  <span><b id="sel-n"></b> selected · <b id="sel-size"></b></span>
+  <button class="btn danger" id="sel-mark">Mark for removal</button>
+  <button class="btn" id="sel-clear">Clear</button>
+</div>
+
 <div class="shade" id="shade"></div>
 <aside class="drawer" id="drawer" aria-hidden="true"></aside>
 
@@ -227,7 +253,8 @@ const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": 
 const PAGE = 200;
 
 let items = [], lowRes = 720;
-let state = { kind: "", q: "", f: new Set(), sort: "score", dir: -1, shown: PAGE, openId: null };
+let state = { kind: "", q: "", f: new Set(), sort: "score", dir: -1, shown: PAGE, openId: null, sel: new Set() };
+let removalInfo = { dry_run: true, grace_days: 14, plex_sync_error: null };
 const FACTOR_INFO = {
   size: ["Size", "Bigger titles score higher"],
   age: ["Age", "Longer on Plex scores higher"],
@@ -303,7 +330,28 @@ async function loadItems() {
 const isLow = i => i.low_quality_bytes > 0;
 const isNever = i => i.in_plex && i.play_count === 0;
 const isKept = i => i.keep_effective || i.quality_exempt_effective;
-const FILTERS = { never: isNever, lowq: i => isLow(i) && !i.quality_exempt_effective, noplex: i => !i.in_plex, kept: isKept };
+const isLeaving = i => !!i.removal;
+const canMark = i => i.in_plex && !i.keep_effective && !i.removal;
+const FILTERS = { never: isNever, lowq: i => isLow(i) && !i.quality_exempt_effective, noplex: i => !i.in_plex, kept: isKept, leaving: isLeaving };
+function untilText(iso) {
+  const d = (new Date(iso) - Date.now()) / 864e5;
+  if (d <= 0) return "due now";
+  if (d < 1) return `in ${Math.max(1, Math.round(d * 24))} h`;
+  return `in ${Math.ceil(d)} day${Math.ceil(d) === 1 ? "" : "s"}`;
+}
+async function loadRemovalInfo() {
+  try {
+    const r = await api("GET", "/api/removals");
+    removalInfo = { dry_run: r.dry_run, grace_days: r.grace_days, plex_sync_error: r.plex_sync_error };
+  } catch {}
+  renderBanner();
+}
+function renderBanner() {
+  const b = $("#banner"), msgs = [];
+  if (removalInfo.plex_sync_error) msgs.push(esc(removalInfo.plex_sync_error));
+  b.hidden = !msgs.length;
+  b.innerHTML = msgs.join("<br>");
+}
 const SORTERS = {
   score: i => liveScore(i),
   title: i => i.title.toLowerCase(),
@@ -339,7 +387,8 @@ function tile(key, label, value, sub, on) {
 function renderTiles() {
   const sum = a => a.reduce((s, i) => s + i.size_bytes, 0);
   const mv = items.filter(i => i.kind === "movie"), sh = items.filter(i => i.kind === "show");
-  const nv = items.filter(isNever), lq = items.filter(FILTERS.lowq);
+  const nv = items.filter(isNever), lq = items.filter(FILTERS.lowq), lv = items.filter(isLeaving);
+  const next = lv.map(i => i.removal.remove_after).sort()[0];
   const lqBytes = lq.reduce((s, i) => s + i.low_quality_bytes, 0);
   const onlyKind = k => state.kind === k && state.f.size === 0;
   const onlyF = f => !state.kind && state.f.size === 1 && state.f.has(f);
@@ -348,7 +397,8 @@ function renderTiles() {
     tile("movie", "Movies", bytes(sum(mv)), `${mv.length} titles`, onlyKind("movie")) +
     tile("show", "Shows", bytes(sum(sh)), `${sh.length} series`, onlyKind("show")) +
     tile("never", "Never played", bytes(sum(nv)), `${nv.length} titles`, onlyF("never")) +
-    tile("lowq", `${lowRes}p or lower`, bytes(lqBytes), `in ${lq.length} titles`, onlyF("lowq"));
+    tile("lowq", `${lowRes}p or lower`, bytes(lqBytes), `in ${lq.length} titles`, onlyF("lowq")) +
+    tile("leaving", "Leaving Soon", bytes(sum(lv)), lv.length ? `${lv.length} titles · next ${untilText(next)}` : "none listed", onlyF("leaving"));
 }
 
 function row(i, maxSize) {
@@ -357,7 +407,10 @@ function row(i, maxSize) {
     i.kind === "show" ? `<span class="badge">Show</span>` : "",
     !i.in_plex ? `<span class="badge warn">Not in Plex</span>` : "",
     i.keep_effective ? `<span class="badge ok">Protected</span>` : "",
+    i.removal ? `<span class="badge leave" title="Removal due ${esc(date(i.removal.remove_after))}">Leaving ${untilText(i.removal.remove_after)}</span>` : "",
   ].join("");
+  const ck = `<td class="ck"><input type="checkbox" data-ck="${i.id}" ${state.sel.has(i.id) ? "checked" : ""} ${canMark(i) ? "" : "disabled"}
+    title="${canMark(i) ? "Select" : i.removal ? "Already leaving" : i.keep_effective ? "Protected" : "Not in Plex"}" aria-label="Select ${esc(i.title)}"></td>`;
   const viewers = `<span class="sub"> · ${i.unique_viewers} ${i.unique_viewers === 1 ? "viewer" : "viewers"}</span>`;
   const plays = !i.in_plex ? `<span class="never">—</span>`
     : i.kind === "show" ? (watchedShare(i) === 0 ? `<span class="never">0% watched</span>`
@@ -368,6 +421,7 @@ function row(i, maxSize) {
   const scoreCell = sc === null ? `<span class="excl">${esc(i.excluded || "—")}</span>`
     : `<div class="scorecell">${Math.round(sc)}<span class="scorebar"><i style="width:${Math.max(2, sc)}%"></i></span></div>`;
   return `<tr data-id="${i.id}" class="${state.openId === i.id ? "sel" : ""}">
+    ${ck}
     <td><span class="title">${esc(i.title)}</span> <span class="sub">${i.year ?? ""}</span>${badges}</td>
     <td class="num">${scoreCell}</td>
     <td class="num"><div class="sizecell">${bytes(i.size_bytes)}<span class="sizebar"><i style="width:${Math.max(2, i.size_bytes / maxSize * 100)}%"></i></span></div></td>
@@ -395,6 +449,42 @@ function render() {
   $$("#kind button").forEach(b => b.classList.toggle("on", b.dataset.kind === state.kind));
   $$(".chip").forEach(c => c.classList.toggle("on", state.f.has(c.dataset.f)));
   renderTiles();
+  renderSel(v);
+}
+
+function renderSel(v = view()) {
+  for (const id of [...state.sel]) { const i = items.find(x => x.id === id); if (!i || !canMark(i)) state.sel.delete(id); }
+  const chosen = items.filter(i => state.sel.has(i.id));
+  $("#selbar").hidden = !chosen.length;
+  $("#sel-n").textContent = `${chosen.length} title${chosen.length === 1 ? "" : "s"}`;
+  $("#sel-size").textContent = bytes(chosen.reduce((s, i) => s + i.size_bytes, 0));
+  const markable = v.slice(0, state.shown).filter(canMark);
+  const all = $("#ck-all");
+  all.checked = markable.length > 0 && markable.every(i => state.sel.has(i.id));
+  all.indeterminate = !all.checked && markable.some(i => state.sel.has(i.id));
+}
+
+async function markForRemoval(ids) {
+  const n = ids.length, size = bytes(items.filter(i => ids.includes(i.id)).reduce((s, i) => s + i.size_bytes, 0));
+  const when = removalInfo.grace_days ? `in ${removalInfo.grace_days} days` : "at the next check";
+  if (!confirm(`Put ${n} title${n === 1 ? "" : "s"} (${size}) in Leaving Soon?\n\nThey'll be listed in a "Leaving Soon" collection in Plex and removed ${when}` +
+      (removalInfo.dry_run ? " (dry run: nothing is deleted while dry run is on in Settings)." : ".") +
+      `\nYou can keep any of them until then.`)) return false;
+  try {
+    const r = await api("POST", "/api/removals", { item_ids: ids });
+    const refused = Object.entries(r.refused || {});
+    if (refused.length) alert(`Not listed:\n` + refused.map(([id, why]) => `${(items.find(i => i.id === +id) || {}).title || id}: ${why}`).join("\n"));
+  } catch (e) { alert(`Couldn't mark: ${e.message}`); return false; }
+  for (const id of ids) state.sel.delete(id);
+  await loadItems(); render();
+  return true;
+}
+
+async function keepIt(removalId) {
+  try { await api("DELETE", `/api/removals/${removalId}`); }
+  catch (e) { alert(`Couldn't keep it: ${e.message}`); return; }
+  await loadItems(); render();
+  if (state.openId) openItem(state.openId);
 }
 
 // ---------------------------------------------------------------- detail drawer
@@ -439,6 +529,11 @@ async function openItem(id) {
       <button class="x" data-close aria-label="Close">×</button>
     </div>
     ${!d.in_plex ? `<div class="note">Not found in Plex, so there's no age or watch data. It may be missing from Plex or matched to the wrong title.</div>` : ""}
+    ${d.removal ? `<div class="leavebox"><b>Leaving Soon</b> · removal due ${esc(date(d.removal.remove_after))} (${untilText(d.removal.remove_after)})
+        <div class="muted">It's in the Leaving Soon collection in Plex. If anyone finishes watching it before then, it stays.</div>
+        <div class="row"><button class="btn" data-keep="${d.removal.id}">Keep it</button></div></div>`
+      : canMark(d) ? `<div class="markbox"><span>Put it in Leaving Soon; it's removed after ${removalInfo.grace_days} days unless someone watches it.</span>
+        <button class="btn danger" data-mark="${d.id}">Mark for removal</button></div>` : ""}
     <div class="toggles">
       ${toggleHtml("keep", "Protect", "Never suggest removing this", d.keep_effective, keepTag)}
       ${toggleHtml("quality_exempt", "Quality exempt", `Don't count ${lowRes}p-or-lower files against it`, d.quality_exempt_effective, exTag)}
@@ -572,7 +667,7 @@ async function scanNow() {
     const run = await refreshScanStatus().catch(() => null);
     if (run && run.status !== "running") break;
   }
-  await loadItems(); render();
+  await loadItems(); await loadRemovalInfo(); render();
 }
 
 // ---------------------------------------------------------------- events
@@ -593,10 +688,28 @@ $("thead").onclick = e => {
   state.dir = state.sort === s ? -state.dir : DEFAULT_DIR[s];
   state.sort = s; render();
 };
-$("#rows").onclick = e => { const tr = e.target.closest("tr[data-id]"); if (tr) openItem(+tr.dataset.id); };
+$("#rows").onclick = e => {
+  const ck = e.target.closest("[data-ck]");
+  if (ck) { const id = +ck.dataset.ck; ck.checked ? state.sel.add(id) : state.sel.delete(id); renderSel(); return; }
+  if (e.target.closest("td.ck")) return;
+  const tr = e.target.closest("tr[data-id]"); if (tr) openItem(+tr.dataset.id);
+};
+$("#ck-all").onclick = e => {
+  const shown = view().slice(0, state.shown).filter(canMark);
+  for (const i of shown) e.target.checked ? state.sel.add(i.id) : state.sel.delete(i.id);
+  render();
+};
+$("#sel-clear").onclick = () => { state.sel.clear(); render(); };
+$("#sel-mark").onclick = async () => { const b = $("#sel-mark"); b.disabled = true; await markForRemoval([...state.sel]); b.disabled = false; };
 $("#more").onclick = () => { state.shown += PAGE; render(); };
 $("#shade").onclick = closeDrawer;
-$("#drawer").addEventListener("click", e => { if (e.target.closest("[data-close]")) closeDrawer(); });
+$("#drawer").addEventListener("click", async e => {
+  if (e.target.closest("[data-close]")) return closeDrawer();
+  const m = e.target.closest("[data-mark]");
+  if (m) { m.disabled = true; if (await markForRemoval([+m.dataset.mark])) openItem(+m.dataset.mark); else m.disabled = false; }
+  const k = e.target.closest("[data-keep]");
+  if (k) { k.disabled = true; await keepIt(+k.dataset.keep); }
+});
 $("#drawer").addEventListener("change", e => { if (e.target.dataset.flag) setFlag(e.target); });
 document.addEventListener("keydown", e => { if (e.key === "Escape") closeDrawer(); });
 $("#scan-btn").onclick = scanNow;
@@ -609,6 +722,7 @@ $("#weights-grid").addEventListener("input", onWeight);
     lowRes = s.values.low_quality_max_resolution || 720;
   } catch {}
   const run = await refreshScanStatus().catch(() => null);
+  await loadRemovalInfo();
   await loadItems().catch(e => { $("#empty").hidden = false; $("#empty").textContent = `Couldn't load: ${e.message}`; });
   renderWeights();
   render();
