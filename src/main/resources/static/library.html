@@ -168,6 +168,7 @@
   .markbox { display: flex; align-items: center; justify-content: space-between; gap: 12px; border: 1px solid var(--line); border-radius: 9px; padding: 10px 12px; margin-top: 8px; }
   .markbox span { font-size: 13px; color: var(--muted); }
   .banner { background: var(--warn-bg); color: var(--warn); border-radius: 9px; padding: 9px 14px; font-size: 13px; margin-bottom: 14px; }
+  .banner a { color: inherit; font-weight: 600; }
 
   @media (max-width: 980px) {
     .tiles { grid-template-columns: repeat(3, minmax(0, 1fr)); }
@@ -189,7 +190,7 @@
 <div class="wrap">
   <div class="top">
     <span class="brand">Karlstodian <span class="ver" id="app-version"></span></span>
-    <nav><a href="/library" class="on">Library</a><a href="/settings">Settings</a></nav>
+    <nav><a href="/library" class="on">Library</a><a href="/removals">Removals</a><a href="/settings">Settings</a></nav>
     <div class="scan">
       <span class="scan-status" id="scan-status">…</span>
       <button class="btn primary" id="scan-btn">Scan now</button>
@@ -348,6 +349,7 @@ async function loadRemovalInfo() {
 }
 function renderBanner() {
   const b = $("#banner"), msgs = [];
+  if (removalInfo.dry_run && items.some(isLeaving)) msgs.push(`Dry run is on: titles leaving soon will only be logged, not deleted. See <a href="/removals">Removals</a>.`);
   if (removalInfo.plex_sync_error) msgs.push(esc(removalInfo.plex_sync_error));
   b.hidden = !msgs.length;
   b.innerHTML = msgs.join("<br>");
@@ -531,7 +533,7 @@ async function openItem(id) {
     ${!d.in_plex ? `<div class="note">Not found in Plex, so there's no age or watch data. It may be missing from Plex or matched to the wrong title.</div>` : ""}
     ${d.removal ? `<div class="leavebox"><b>Leaving Soon</b> · removal due ${esc(date(d.removal.remove_after))} (${untilText(d.removal.remove_after)})
         <div class="muted">It's in the Leaving Soon collection in Plex. If anyone finishes watching it before then, it stays.</div>
-        <div class="row"><button class="btn" data-keep="${d.removal.id}">Keep it</button></div></div>`
+        <div class="row"><button class="btn" data-keep="${d.removal.id}">Keep it</button><button class="btn danger" data-remove-now="${d.removal.id}">Remove now</button></div></div>`
       : canMark(d) ? `<div class="markbox"><span>Put it in Leaving Soon; it's removed after ${removalInfo.grace_days} days unless someone watches it.</span>
         <button class="btn danger" data-mark="${d.id}">Mark for removal</button></div>` : ""}
     <div class="toggles">
@@ -709,6 +711,13 @@ $("#drawer").addEventListener("click", async e => {
   if (m) { m.disabled = true; if (await markForRemoval([+m.dataset.mark])) openItem(+m.dataset.mark); else m.disabled = false; }
   const k = e.target.closest("[data-keep]");
   if (k) { k.disabled = true; await keepIt(+k.dataset.keep); }
+  const rn = e.target.closest("[data-remove-now]");
+  if (rn) {
+    if (!confirm(removalInfo.dry_run ? "Run this removal now? Dry run is on, so it's only logged." : "Remove it now? Its files are deleted through Radarr/Sonarr, and its torrents once they've seeded long enough. This can't be undone.")) return;
+    rn.disabled = true;
+    try { await api("POST", `/api/removals/${rn.dataset.removeNow}/remove`); } catch (err) { alert(err.message); }
+    await loadItems(); render(); openItem(state.openId);
+  }
 });
 $("#drawer").addEventListener("change", e => { if (e.target.dataset.flag) setFlag(e.target); });
 document.addEventListener("keydown", e => { if (e.key === "Escape") closeDrawer(); });

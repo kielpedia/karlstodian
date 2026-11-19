@@ -19,6 +19,10 @@ class RemovalTest {
         env.overrides["plex" to "/identity"] = HttpStatusCode.OK to """{"MediaContainer": {"machineIdentifier": "MID"}}"""
         env.overrides["plex" to "/library/sections/1/collections"] = HttpStatusCode.OK to """{"MediaContainer": {}}"""
         env.overrides["plex" to "/library/sections/2/collections"] = HttpStatusCode.OK to """{"MediaContainer": {}}"""
+        env.overrides["plex" to "/library/sections/1/refresh"] = HttpStatusCode.OK to ""
+        env.overrides["radarr" to "/api/v3/movie/10"] = HttpStatusCode.OK to """{"id": 10}"""
+        env.overrides["radarr" to "/api/v3/moviefile"] = HttpStatusCode.OK to """[{"id": 1}]"""
+        env.overrides["sonarr" to "/api/v3/series/20"] = HttpStatusCode.OK to """{"id": 20}"""
         runBlocking { runScan() }
         env.writes.clear()
     }
@@ -123,5 +127,144 @@ class RemovalTest {
 
         assertEquals(HttpStatusCode.UnprocessableEntity, client.send(HttpMethod.Post, "/api/removals", """{"item_ids": "x"}""").status)
         assertEquals(2, client.get("/api/removals?state=history").obj()["removals"]!!.jsonArray.size)
+    }
+
+    // ------------------------------------------------------------------ engine
+
+    private val t0 = Instant.parse("2026-11-01T12:00:00Z")
+    private fun days(d: Long) = t0.plus(Duration.ofDays(d))
+    private fun settings(vararg kv: Pair<String, Any>) = Config.apply(Config.merge(buildJsonObject {
+        for ((k, v) in kv) when (v) { is Boolean -> put(k, v); is Number -> put(k, v); else -> put(k, v.toString()) }
+    }), persist = false)
+    private fun removalOf(itemId: Long) = db.removals("WHERE item_id = ? ORDER BY id DESC", itemId).first()
+    private fun auditText(r: Removal) = db.audit(100, r.id).reversed().joinToString("\n") { "${it.action}: ${it.detail}" }
+    private fun seeded(days: Long) {
+        env.overrides["qbit" to "/api/v2/torrents/info"] = HttpStatusCode.OK to
+            """[{"hash": "abc123", "name": "movie.a", "size": 100, "seeding_time": ${days * 86400}, "tracker": "https://t/pk/announce"}]"""
+    }
+
+    @Test fun dryRunOnlyLogs() = runBlocking {
+        Removals.mark(listOf(movie().id!!), now = t0)
+        Removals.processDue(now = days(13))
+        assertEquals("leaving", removalOf(movie().id!!).state) // grace period not over yet
+        Removals.processDue(now = days(15))
+        val r = removalOf(movie().id!!)
+        assertEquals("done", r.state); assertTrue(r.dry_run)
+        assertEquals(emptyList(), env.writes)
+        val log = auditText(r)
+        assertTrue("Would unmonitor it in Radarr and delete 1 file" in log, log)
+        assertTrue("Would keep movie.a seeding until" in log, log) // seeded 1 day of 14
+        assertTrue(db.audit(100, r.id).filter { it.action != "marked" }.all { it.dry_run })
+        assertTrue(db.removalTorrents(r.id!!).isEmpty()) // nothing recorded as deleted in a dry run
+    }
+
+    @Test fun realRemovalWaitsForSeedTime() = runBlocking {
+        settings("dry_run" to false)
+        Removals.mark(listOf(movie().id!!), now = t0)
+        Removals.processDue(now = days(15))
+        var r = removalOf(movie().id!!)
+        assertEquals("waiting_seed", r.state)
+        assertEquals(listOf(
+            """PUT radarr/api/v3/movie/editor {"movieIds":[10],"monitored":false}""",
+            """DELETE radarr/api/v3/moviefile/bulk {"movieFileIds":[1]}""",
+        ), env.writes)
+        val rt = db.removalTorrents(r.id!!).single()
+        assertEquals("pending", rt.state); assertEquals("t", rt.tracker_host)
+        assertEquals(days(15).plus(Duration.ofDays(13)), rt.seed_until) // seeded 1 of 14 days
+
+        env.writes.clear()
+        Removals.processDue(now = days(27))
+        assertEquals(emptyList(), env.writes)
+        seeded(20)
+        Removals.processDue(now = days(29))
+        assertEquals(listOf("POST qbit/api/v2/torrents/delete hashes=abc123&deleteFiles=true"), env.writes)
+        r = removalOf(movie().id!!)
+        assertEquals("done", r.state); assertFalse(r.dry_run)
+        assertEquals("deleted", db.removalTorrents(r.id!!).single().state)
+    }
+
+    @Test fun perTrackerSeedRule() = runBlocking {
+        settings("dry_run" to false, "seed_min_days" to 30)
+        seeded(10)
+        Config.apply(Config.merge(buildJsonObject { putJsonObject("seed_rules") { put("t", 5) } }), persist = false)
+        Removals.mark(listOf(movie().id!!), now = t0)
+        Removals.processDue(now = days(15))
+        assertTrue(env.writes.any { it.startsWith("POST qbit/api/v2/torrents/delete") }) // 10 days >= 5 for tracker "t"
+        assertEquals("done", removalOf(movie().id!!).state)
+    }
+
+    @Test fun sharedTorrentStaysForTheOtherTitle() = runBlocking {
+        settings("dry_run" to false)
+        seeded(30)
+        db.exec("UPDATE mediafile SET torrent_hash = 'abc123' WHERE item_id = ?", show().id)
+        Removals.mark(listOf(movie().id!!), now = t0)
+        Removals.processDue(now = days(15))
+        val r = removalOf(movie().id!!)
+        assertEquals("done", r.state)
+        assertEquals("kept_shared", db.removalTorrents(r.id!!).single().state)
+        assertTrue(env.writes.none { it.contains("torrents/delete") })
+        assertTrue("also used by Show B" in auditText(r))
+    }
+
+    @Test fun watchingDuringGraceKeepsIt() = runBlocking {
+        Removals.mark(listOf(movie().id!!), now = t0)
+        val m = movie(); m.play_count += 1; db.saveItem(m)
+        Removals.processDue(now = days(15))
+        val r = removalOf(m.id!!)
+        assertEquals("cancelled", r.state)
+        assertTrue("Watched during the grace period" in auditText(r))
+        assertEquals(emptyList(), env.writes)
+    }
+
+    @Test fun watchingIgnoredWhenTurnedOff() = runBlocking {
+        settings("cancel_on_watch" to false)
+        Removals.mark(listOf(movie().id!!), now = t0)
+        val m = movie(); m.play_count += 1; db.saveItem(m)
+        Removals.processDue(now = days(15))
+        assertEquals("done", removalOf(m.id!!).state)
+    }
+
+    @Test fun protectedLaterIsNotRemoved() = runBlocking {
+        Removals.mark(listOf(movie().id!!), now = t0)
+        val m = movie(); m.keep = true; db.saveItem(m)
+        Removals.processDue(now = days(15))
+        assertEquals("cancelled", removalOf(m.id!!).state)
+    }
+
+    @Test fun capPerRun() = runBlocking {
+        settings("max_removals_per_run" to 1)
+        Removals.mark(listOf(movie().id!!, show().id!!), now = t0)
+        assertEquals(1, Removals.processDue(now = days(15)).int("removed"))
+        assertEquals(1, Removals.active().size)
+        assertEquals(1, Removals.processDue(now = days(15)).int("removed"))
+        assertTrue(Removals.active().isEmpty())
+    }
+
+    @Test fun failureThenRetry() = runBlocking {
+        settings("dry_run" to false)
+        seeded(30)
+        env.overrides["radarr" to "/api/v3/movie/editor"] = HttpStatusCode.InternalServerError to "{}"
+        val id = Removals.mark(listOf(movie().id!!), now = t0).marked.single().id!!
+        var r = Removals.removeNow(id, now = days(1))
+        assertEquals("failed", r.state); assertNotNull(r.error)
+        assertTrue(env.writes.none { it.contains("torrents/delete") }) // stopped before the torrents
+        env.overrides.remove("radarr" to "/api/v3/movie/editor")
+        r = Removals.removeNow(id, now = days(1))
+        assertEquals("done", r.state)
+        assertNull(r.error)
+        assertTrue(env.writes.any { it.contains("torrents/delete") })
+    }
+
+    @Test fun removeNowApi() = withApp {
+        val id = Removals.mark(listOf(movie().id!!)).marked.single().id!!
+        var r = client.send(HttpMethod.Post, "/api/removals/$id/remove")
+        assertEquals(HttpStatusCode.OK, r.status)
+        assertEquals("done", r.obj().str("state")) // dry run
+        assertEquals(HttpStatusCode.Conflict, client.send(HttpMethod.Post, "/api/removals/$id/remove").status)
+        val audit = json.parseToJsonElement(client.get("/api/audit?removal_id=$id").bodyAsText()).jsonArray
+        assertTrue(audit.size >= 3)
+        r = client.send(HttpMethod.Post, "/api/removals/run")
+        assertEquals(0, r.obj().int("removed"))
+        assertEquals(HttpStatusCode.OK, client.get("/removals").status)
     }
 }

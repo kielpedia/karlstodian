@@ -170,7 +170,17 @@ fun Application.module() {
 
     Store.db // open + migrate on startup
     Scheduler.reschedule(this)
-    monitor.subscribe(ApplicationStopping) { Scheduler.stop() }
+    // Removal runs: hourly, starting a couple of minutes after startup
+    val removalTimer = launch {
+        delay(120_000)
+        while (isActive) {
+            try { Removals.processDue(); Removals.syncSafely() }
+            catch (e: CancellationException) { throw e }
+            catch (e: Exception) { log.error("removal run failed", e) }
+            delay(3_600_000)
+        }
+    }
+    monitor.subscribe(ApplicationStopping) { Scheduler.stop(); removalTimer.cancel() }
 
     suspend fun ApplicationCall.body(): JsonObject {
         val text = receiveText()
@@ -189,7 +199,7 @@ fun Application.module() {
     routing {
         // pages
         get("/") { call.respondRedirect("/library") }
-        for (p in listOf("library", "settings")) {
+        for (p in listOf("library", "removals", "settings")) {
             get("/$p") {
                 call.response.header(HttpHeaders.CacheControl, "no-cache")
                 call.respondText(page("$p.html"), ContentType.Text.Html)
@@ -325,6 +335,26 @@ fun Application.module() {
                 put("marked", JsonArray(res.marked.map { removalOut(it) }))
                 put("refused", JsonObject(res.refused.mapKeys { it.key.toString() }.mapValues { JsonPrimitive(it.value) }))
             })
+        }
+
+        /** Remove it now instead of waiting for the grace period (still a dry run while dry run is on). */
+        post("/api/removals/{id}/remove") {
+            val r = Removals.removeNow(itemId(call))
+            this@module.launch { Removals.syncSafely() }
+            call.respond(removalOut(r))
+        }
+
+        /** Run the removal check now (what the hourly timer does). */
+        post("/api/removals/run") {
+            val res = Removals.processDue()
+            Removals.syncSafely()
+            call.respond(res)
+        }
+
+        get("/api/audit") {
+            val q = call.request.queryParameters
+            val limit = (q["limit"]?.toIntOrNull() ?: 200).coerceIn(1, 2000)
+            call.respond(json.encodeToJsonElement(Store.db.audit(limit, q["removal_id"]?.toLongOrNull())))
         }
 
         /** Keep it after all: take it off the list. */
