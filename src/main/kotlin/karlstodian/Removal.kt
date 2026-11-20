@@ -116,7 +116,23 @@ object Removals {
                         for (rk in have - want) p.removeFromCollection(existing, rk)
                     }
                 }
+                if (want.isNotEmpty()) pin(p, key, existing ?: p.collections(key)[cfg.leaving_soon_title], cfg)
             }
+        }
+    }
+
+    /**
+     * Shows the collection as a row on Home (yours and your friends') and the library's Recommended tab.
+     * Best effort: a collection that can't be pinned still works from the library's Collections tab.
+     */
+    private suspend fun pin(p: PlexClient, sectionKey: String, collectionKey: String?, cfg: Settings) {
+        if (collectionKey == null) return
+        try {
+            if (!p.collectionPinned(sectionKey, collectionKey)) p.pinCollection(sectionKey, collectionKey)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            log.warn("Couldn't pin the ${cfg.leaving_soon_title} collection to Home in Plex section $sectionKey: ${friendly(e)}")
         }
     }
 

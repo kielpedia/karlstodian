@@ -124,6 +124,19 @@ class PlexClient(url: String, token: String, verify: Boolean? = null, timeout: D
         send(HttpMethod.Delete, "/library/collections/$collectionKey")
     }
 
+    /** True if the collection is already pinned (shown as a row on Recommended / Home). */
+    suspend fun collectionPinned(sectionKey: String, collectionKey: String): Boolean =
+        get("/hubs/sections/$sectionKey/manage", mapOf("metadataItemId" to collectionKey)).obj
+            .child("MediaContainer")?.get("Hub").arr.isNotEmpty()
+
+    /** Pins a collection as a row on the library's Recommended tab, your Home and your friends' Home. */
+    suspend fun pinCollection(sectionKey: String, collectionKey: String) {
+        send(HttpMethod.Post, "/hubs/sections/$sectionKey/manage", mapOf(
+            "metadataItemId" to collectionKey,
+            "promotedToRecommended" to 1, "promotedToOwnHome" to 1, "promotedToSharedHome" to 1,
+        ))
+    }
+
     /** Ask Plex to rescan a library section (after files were deleted). */
     suspend fun refreshSection(sectionKey: String) {
         get("/library/sections/$sectionKey/refresh")

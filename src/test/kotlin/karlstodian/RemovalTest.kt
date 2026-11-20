@@ -79,13 +79,39 @@ class RemovalTest {
             """{"MediaContainer": {"Metadata": [{"ratingKey": "777"}]}}"""
         env.overrides["plex" to "/library/sections/2/collections"] = HttpStatusCode.OK to
             """{"MediaContainer": {"Metadata": [{"title": "Leaving Soon", "ratingKey": "66"}]}}"""
+        env.overrides["plex" to "/hubs/sections/1/manage"] = HttpStatusCode.OK to """{"MediaContainer": {"size": 0}}"""
         Removals.mark(listOf(movie().id!!))
         Removals.syncLeavingSoon()
         assertEquals(listOf(
             "PUT plex/library/collections/55/items?uri=server://MID/com.plexapp.plugins.library/library/metadata/900",
             "DELETE plex/library/collections/55/children/777",
+            "POST plex/hubs/sections/1/manage?metadataItemId=55&promotedToRecommended=1&promotedToOwnHome=1&promotedToSharedHome=1",
             "DELETE plex/library/collections/66", // nothing leaving from the TV section any more
         ), env.writes)
+    }
+
+    @Test fun pinnedCollectionIsLeftAlone() = runBlocking {
+        env.overrides["plex" to "/library/sections/1/collections"] = HttpStatusCode.OK to
+            """{"MediaContainer": {"Metadata": [{"title": "Leaving Soon", "ratingKey": "55"}]}}"""
+        env.overrides["plex" to "/library/collections/55/children"] = HttpStatusCode.OK to
+            """{"MediaContainer": {"Metadata": [{"ratingKey": "900"}]}}"""
+        env.overrides["plex" to "/hubs/sections/1/manage"] = HttpStatusCode.OK to
+            """{"MediaContainer": {"size": 1, "Hub": [{"identifier": "custom.collection.1.55"}]}}"""
+        Removals.mark(listOf(movie().id!!))
+        Removals.syncSafely()
+        assertEquals(emptyList(), env.writes)
+        assertNull(Removals.plexSyncError)
+    }
+
+    @Test fun pinFailureIsNotASyncError() = runBlocking {
+        env.overrides["plex" to "/library/sections/1/collections"] = HttpStatusCode.OK to
+            """{"MediaContainer": {"Metadata": [{"title": "Leaving Soon", "ratingKey": "55"}]}}"""
+        env.overrides["plex" to "/library/collections/55/children"] = HttpStatusCode.OK to """{"MediaContainer": {}}"""
+        env.overrides["plex" to "/hubs/sections/1/manage"] = HttpStatusCode.InternalServerError to "{}"
+        Removals.mark(listOf(movie().id!!))
+        Removals.syncSafely()
+        assertNull(Removals.plexSyncError) // the collection itself was still updated
+        assertEquals(listOf("PUT plex/library/collections/55/items?uri=server://MID/com.plexapp.plugins.library/library/metadata/900"), env.writes)
     }
 
     @Test fun plexFailureDoesNotBlockMarking() = runBlocking {
