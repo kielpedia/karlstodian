@@ -67,8 +67,8 @@ class RemovalTest {
         Removals.mark(listOf(movie().id!!, show().id!!))
         Removals.syncLeavingSoon()
         assertEquals(listOf(
-            "POST plex/library/collections?type=1&title=Leaving Soon&smart=0&sectionId=1&uri=server://MID/com.plexapp.plugins.library/library/metadata/900",
-            "POST plex/library/collections?type=2&title=Leaving Soon&smart=0&sectionId=2&uri=server://MID/com.plexapp.plugins.library/library/metadata/800",
+            "POST plex/library/collections?type=1&title=Leaving Soon: Movies&smart=0&sectionId=1&uri=server://MID/com.plexapp.plugins.library/library/metadata/900",
+            "POST plex/library/collections?type=2&title=Leaving Soon: TV&smart=0&sectionId=2&uri=server://MID/com.plexapp.plugins.library/library/metadata/800",
         ), env.writes)
     }
 
@@ -83,6 +83,7 @@ class RemovalTest {
         Removals.mark(listOf(movie().id!!))
         Removals.syncLeavingSoon()
         assertEquals(listOf(
+            "PUT plex/library/sections/1/all?type=18&id=55&title.value=Leaving Soon: Movies&title.locked=1", // old name
             "PUT plex/library/collections/55/items?uri=server://MID/com.plexapp.plugins.library/library/metadata/900",
             "DELETE plex/library/collections/55/children/777",
             "POST plex/hubs/sections/1/manage?metadataItemId=55&promotedToRecommended=1&promotedToOwnHome=1&promotedToSharedHome=1",
@@ -92,7 +93,7 @@ class RemovalTest {
 
     @Test fun pinnedCollectionIsLeftAlone() = runBlocking {
         env.overrides["plex" to "/library/sections/1/collections"] = HttpStatusCode.OK to
-            """{"MediaContainer": {"Metadata": [{"title": "Leaving Soon", "ratingKey": "55"}]}}"""
+            """{"MediaContainer": {"Metadata": [{"title": "Leaving Soon: Movies", "ratingKey": "55"}]}}"""
         env.overrides["plex" to "/library/collections/55/children"] = HttpStatusCode.OK to
             """{"MediaContainer": {"Metadata": [{"ratingKey": "900"}]}}"""
         env.overrides["plex" to "/hubs/sections/1/manage"] = HttpStatusCode.OK to
@@ -105,7 +106,7 @@ class RemovalTest {
 
     @Test fun pinFailureIsNotASyncError() = runBlocking {
         env.overrides["plex" to "/library/sections/1/collections"] = HttpStatusCode.OK to
-            """{"MediaContainer": {"Metadata": [{"title": "Leaving Soon", "ratingKey": "55"}]}}"""
+            """{"MediaContainer": {"Metadata": [{"title": "Leaving Soon: Movies", "ratingKey": "55"}]}}"""
         env.overrides["plex" to "/library/collections/55/children"] = HttpStatusCode.OK to """{"MediaContainer": {}}"""
         env.overrides["plex" to "/hubs/sections/1/manage"] = HttpStatusCode.InternalServerError to "{}"
         Removals.mark(listOf(movie().id!!))

@@ -112,6 +112,13 @@ class PlexClient(url: String, token: String, verify: Boolean? = null, timeout: D
         ))
     }
 
+    /** Renames a collection (type 18 = collection) and locks the title so Plex doesn't change it back. */
+    suspend fun renameCollection(sectionKey: String, collectionKey: String, title: String) {
+        send(HttpMethod.Put, "/library/sections/$sectionKey/all", mapOf(
+            "type" to 18, "id" to collectionKey, "title.value" to title, "title.locked" to 1,
+        ))
+    }
+
     suspend fun addToCollection(collectionKey: String, machineId: String, ratingKeys: Collection<String>) {
         send(HttpMethod.Put, "/library/collections/$collectionKey/items", mapOf("uri" to itemsUri(machineId, ratingKeys)))
     }
