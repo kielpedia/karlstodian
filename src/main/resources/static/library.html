@@ -240,6 +240,7 @@
 <div class="selbar" id="selbar" hidden>
   <span><b id="sel-n"></b> selected · <b id="sel-size"></b></span>
   <button class="btn danger" id="sel-mark">Mark for removal</button>
+  <button class="btn danger" id="sel-now" title="Titles that aren't in Plex skip Leaving Soon">Remove now</button>
   <button class="btn" id="sel-clear">Clear</button>
 </div>
 
@@ -333,6 +334,8 @@ const isNever = i => i.in_plex && i.play_count === 0;
 const isKept = i => i.keep_effective || i.quality_exempt_effective;
 const isLeaving = i => !!i.removal;
 const canMark = i => i.in_plex && !i.keep_effective && !i.removal;
+const canRemoveNow = i => !i.in_plex && !i.keep_effective && !i.removal; // nobody can watch it, so no grace period
+const canSelect = i => canMark(i) || canRemoveNow(i);
 const FILTERS = { never: isNever, lowq: i => isLow(i) && !i.quality_exempt_effective, noplex: i => !i.in_plex, kept: isKept, leaving: isLeaving };
 function untilText(iso) {
   const d = (new Date(iso) - Date.now()) / 864e5;
@@ -411,8 +414,8 @@ function row(i, maxSize) {
     i.keep_effective ? `<span class="badge ok">Protected</span>` : "",
     i.removal ? `<span class="badge leave" title="Removal due ${esc(date(i.removal.remove_after))}">Leaving ${untilText(i.removal.remove_after)}</span>` : "",
   ].join("");
-  const ck = `<td class="ck"><input type="checkbox" data-ck="${i.id}" ${state.sel.has(i.id) ? "checked" : ""} ${canMark(i) ? "" : "disabled"}
-    title="${canMark(i) ? "Select" : i.removal ? "Already leaving" : i.keep_effective ? "Protected" : "Not in Plex"}" aria-label="Select ${esc(i.title)}"></td>`;
+  const ck = `<td class="ck"><input type="checkbox" data-ck="${i.id}" ${state.sel.has(i.id) ? "checked" : ""} ${canSelect(i) ? "" : "disabled"}
+    title="${canSelect(i) ? "Select" : i.removal ? "Already leaving" : "Protected"}" aria-label="Select ${esc(i.title)}"></td>`;
   const viewers = `<span class="sub"> · ${i.unique_viewers} ${i.unique_viewers === 1 ? "viewer" : "viewers"}</span>`;
   const plays = !i.in_plex ? `<span class="never">—</span>`
     : i.kind === "show" ? (watchedShare(i) === 0 ? `<span class="never">0% watched</span>`
@@ -455,12 +458,17 @@ function render() {
 }
 
 function renderSel(v = view()) {
-  for (const id of [...state.sel]) { const i = items.find(x => x.id === id); if (!i || !canMark(i)) state.sel.delete(id); }
+  for (const id of [...state.sel]) { const i = items.find(x => x.id === id); if (!i || !canSelect(i)) state.sel.delete(id); }
   const chosen = items.filter(i => state.sel.has(i.id));
   $("#selbar").hidden = !chosen.length;
   $("#sel-n").textContent = `${chosen.length} title${chosen.length === 1 ? "" : "s"}`;
   $("#sel-size").textContent = bytes(chosen.reduce((s, i) => s + i.size_bytes, 0));
-  const markable = v.slice(0, state.shown).filter(canMark);
+  const nMark = chosen.filter(canMark).length, nNow = chosen.filter(canRemoveNow).length;
+  $("#sel-mark").hidden = !nMark; $("#sel-now").hidden = !nNow;
+  const mixed = nMark && nNow;
+  $("#sel-mark").textContent = mixed ? `Mark ${nMark} for removal` : "Mark for removal";
+  $("#sel-now").textContent = mixed ? `Remove ${nNow} not in Plex now` : "Remove now";
+  const markable = v.slice(0, state.shown).filter(canSelect);
   const all = $("#ck-all");
   all.checked = markable.length > 0 && markable.every(i => state.sel.has(i.id));
   all.indeterminate = !all.checked && markable.some(i => state.sel.has(i.id));
@@ -477,6 +485,28 @@ async function markForRemoval(ids) {
     const refused = Object.entries(r.refused || {});
     if (refused.length) alert(`Not listed:\n` + refused.map(([id, why]) => `${(items.find(i => i.id === +id) || {}).title || id}: ${why}`).join("\n"));
   } catch (e) { alert(`Couldn't mark: ${e.message}`); return false; }
+  for (const id of ids) state.sel.delete(id);
+  await loadItems(); render();
+  return true;
+}
+
+/** Titles that aren't in Plex: no Leaving Soon, they're removed straight away. */
+async function removeNotInPlex(ids) {
+  const chosen = items.filter(i => ids.includes(i.id)), n = chosen.length;
+  const size = bytes(chosen.reduce((s, i) => s + i.size_bytes, 0));
+  const names = chosen.slice(0, 8).map(i => `  ${i.title}${i.year ? ` (${i.year})` : ""}`).join("\n") + (n > 8 ? `\n  and ${n - 8} more` : "");
+  if (!confirm(removalInfo.dry_run
+      ? `Remove ${n} title${n === 1 ? " that isn't" : "s that aren't"} in Plex (${size})?\n\n${names}\n\nDry run is on, so it's only logged.`
+      : `Remove ${n} title${n === 1 ? " that isn't" : "s that aren't"} in Plex (${size}) now?\n\n${names}\n\n` +
+        `Their files are deleted through Radarr/Sonarr, and their torrents once they've seeded long enough. ` +
+        `If a title is only missing from Plex because it's matched wrong, fix that in Plex instead. This can't be undone.`)) return false;
+  try {
+    const r = await api("POST", "/api/removals", { item_ids: ids, now: true });
+    const lines = [];
+    for (const x of r.marked || []) if (x.state === "failed") lines.push(`${x.title}: failed, ${x.error || "see the Removals page"}`);
+    for (const [id, why] of Object.entries(r.refused || {})) lines.push(`${(items.find(i => i.id === +id) || {}).title || id}: ${why}`);
+    if (lines.length) alert(`Not removed:\n` + lines.join("\n"));
+  } catch (e) { alert(`Couldn't remove: ${e.message}`); return false; }
   for (const id of ids) state.sel.delete(id);
   await loadItems(); render();
   return true;
@@ -535,7 +565,9 @@ async function openItem(id) {
         <div class="muted">It's in the Leaving Soon collection in Plex. If anyone finishes watching it before then, it stays.</div>
         <div class="row"><button class="btn" data-keep="${d.removal.id}">Keep it</button><button class="btn danger" data-remove-now="${d.removal.id}">Remove now</button></div></div>`
       : canMark(d) ? `<div class="markbox"><span>Put it in Leaving Soon; it's removed after ${removalInfo.grace_days} days unless someone watches it.</span>
-        <button class="btn danger" data-mark="${d.id}">Mark for removal</button></div>` : ""}
+        <button class="btn danger" data-mark="${d.id}">Mark for removal</button></div>`
+      : canRemoveNow(d) ? `<div class="markbox"><span>Nobody can watch it in Plex, so it skips Leaving Soon and is removed right away.</span>
+        <button class="btn danger" data-now="${d.id}">Remove now</button></div>` : ""}
     <div class="toggles">
       ${toggleHtml("keep", "Protect", "Never suggest removing this", d.keep_effective, keepTag)}
       ${toggleHtml("quality_exempt", "Quality exempt", `Don't count ${lowRes}p-or-lower files against it`, d.quality_exempt_effective, exTag)}
@@ -697,18 +729,22 @@ $("#rows").onclick = e => {
   const tr = e.target.closest("tr[data-id]"); if (tr) openItem(+tr.dataset.id);
 };
 $("#ck-all").onclick = e => {
-  const shown = view().slice(0, state.shown).filter(canMark);
+  const shown = view().slice(0, state.shown).filter(canSelect);
   for (const i of shown) e.target.checked ? state.sel.add(i.id) : state.sel.delete(i.id);
   render();
 };
 $("#sel-clear").onclick = () => { state.sel.clear(); render(); };
-$("#sel-mark").onclick = async () => { const b = $("#sel-mark"); b.disabled = true; await markForRemoval([...state.sel]); b.disabled = false; };
+const selIds = f => items.filter(i => state.sel.has(i.id) && f(i)).map(i => i.id);
+$("#sel-mark").onclick = async () => { const b = $("#sel-mark"); b.disabled = true; await markForRemoval(selIds(canMark)); b.disabled = false; };
+$("#sel-now").onclick = async () => { const b = $("#sel-now"); b.disabled = true; await removeNotInPlex(selIds(canRemoveNow)); b.disabled = false; };
 $("#more").onclick = () => { state.shown += PAGE; render(); };
 $("#shade").onclick = closeDrawer;
 $("#drawer").addEventListener("click", async e => {
   if (e.target.closest("[data-close]")) return closeDrawer();
   const m = e.target.closest("[data-mark]");
   if (m) { m.disabled = true; if (await markForRemoval([+m.dataset.mark])) openItem(+m.dataset.mark); else m.disabled = false; }
+  const nw = e.target.closest("[data-now]");
+  if (nw) { nw.disabled = true; if (await removeNotInPlex([+nw.dataset.now])) openItem(+nw.dataset.now); else nw.disabled = false; }
   const k = e.target.closest("[data-keep]");
   if (k) { k.disabled = true; await keepIt(+k.dataset.keep); }
   const rn = e.target.closest("[data-remove-now]");
