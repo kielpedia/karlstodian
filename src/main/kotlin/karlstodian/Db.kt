@@ -156,6 +156,7 @@ class Db(path: String) {
             Triple("item", "watched_episodes_all", "INTEGER NOT NULL DEFAULT 0"),
             Triple("userplay", "episodes_watched", "INTEGER NOT NULL DEFAULT 0"),
             Triple("item", "plex_section_key", "VARCHAR"),
+            Triple("removal", "watch_mark", "INTEGER NOT NULL DEFAULT 0"),
         )
 
         private val SCHEMA = listOf(
@@ -195,7 +196,7 @@ class Db(path: String) {
                 id INTEGER NOT NULL, item_key VARCHAR NOT NULL, item_id INTEGER, kind VARCHAR NOT NULL,
                 title VARCHAR NOT NULL, year INTEGER, size_bytes INTEGER NOT NULL, state VARCHAR NOT NULL,
                 marked_at DATETIME NOT NULL, remove_after DATETIME NOT NULL, finished_at DATETIME,
-                error VARCHAR, dry_run BOOLEAN NOT NULL, PRIMARY KEY (id))""",
+                error VARCHAR, dry_run BOOLEAN NOT NULL, watch_mark INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (id))""",
             """CREATE INDEX IF NOT EXISTS ix_removal_state ON removal (state)""",
             """CREATE INDEX IF NOT EXISTS ix_removal_item_key ON removal (item_key)""",
             """CREATE TABLE IF NOT EXISTS removaltorrent (

@@ -119,6 +119,7 @@ data class Removal(
     var finished_at: Instant? = null,
     var error: String? = null,
     var dry_run: Boolean = false,
+    var watch_mark: Long = 0, // watch counters when marked; any increase means someone finished watching
 )
 
 /** A torrent belonging to a removal. state: pending (seeding until seed_until) | deleted | kept_shared | gone */
