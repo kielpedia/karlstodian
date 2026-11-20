@@ -57,6 +57,10 @@ Keep the `PRUNER_*` env prefix and `data/pruner.db` - renaming would orphan exis
   back to the previous jar if it doesn't come up. It skips a round while a scan is running.
   So **merging to `main` deploys**. Rollback = `git revert` on `main`, which ships a new release.
   A release that fails its health check is recorded in `/opt/karlstodian/FAILED_VERSION` and not retried.
+- Container: `Dockerfile` (multi-stage, runs as uid 10001, data in `/data`), `deploy/docker-compose.yml`,
+  `deploy/DOCKER.md`. CI's `image` job builds and smoke-tests it on every PR and pushes
+  `ghcr.io/kielpedia/karlstodian:build-<n>` + `:latest` (with attestation) on `main`. The owner's
+  server still runs the LXC install; the image is an alternative, not what's deployed.
 - `deploy/install-karlstodian.sh` is the one-time (re)install: Java 21, `/opt/karlstodian`, the
   `karlstodian` service and the updater timer. See `deploy/DEPLOY.md`.
 
