@@ -106,9 +106,14 @@ object Removals {
                 val type = when (sec.str("type")) { "movie" -> 1; "show" -> 2; else -> continue }
                 val key = sec.str("key") ?: continue
                 val want = wanted[key].orEmpty()
-                val existing = p.collections(key)[cfg.leaving_soon_title]
+                val title = collectionTitle(cfg, sec.str("title"))
+                val collections = p.collections(key)
+                // A collection from before titles named the library ("Leaving Soon") is renamed, keeping its pins.
+                val existing = collections[title] ?: collections[cfg.leaving_soon_title]?.also {
+                    if (want.isNotEmpty() && title != cfg.leaving_soon_title) p.renameCollection(key, it, title)
+                }
                 when {
-                    existing == null -> if (want.isNotEmpty()) p.createCollection(key, cfg.leaving_soon_title, type, machineId, want)
+                    existing == null -> if (want.isNotEmpty()) p.createCollection(key, title, type, machineId, want)
                     want.isEmpty() -> p.deleteCollection(existing)
                     else -> {
                         val have = p.collectionItems(existing)
@@ -116,7 +121,27 @@ object Removals {
                         for (rk in have - want) p.removeFromCollection(existing, rk)
                     }
                 }
+                if (want.isNotEmpty()) pin(p, key, existing ?: p.collections(key)[title], cfg)
             }
+        }
+    }
+
+    /** "Leaving Soon: Movies": on Plex's Home the rows from different libraries look alike otherwise. */
+    fun collectionTitle(cfg: Settings, sectionTitle: String?) =
+        if (sectionTitle.isNullOrBlank()) cfg.leaving_soon_title else "${cfg.leaving_soon_title}: $sectionTitle"
+
+    /**
+     * Shows the collection as a row on Home (yours and your friends') and the library's Recommended tab.
+     * Best effort: a collection that can't be pinned still works from the library's Collections tab.
+     */
+    private suspend fun pin(p: PlexClient, sectionKey: String, collectionKey: String?, cfg: Settings) {
+        if (collectionKey == null) return
+        try {
+            if (!p.collectionPinned(sectionKey, collectionKey)) p.pinCollection(sectionKey, collectionKey)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            log.warn("Couldn't pin the ${cfg.leaving_soon_title} collection to Home in Plex section $sectionKey: ${friendly(e)}")
         }
     }
 
