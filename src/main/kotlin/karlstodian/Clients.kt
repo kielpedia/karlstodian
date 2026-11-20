@@ -214,6 +214,9 @@ abstract class ArrClient(url: String, apiKey: String, verify: Boolean?, timeout:
 
     suspend fun systemStatus(): JsonObject = get("/api/v3/system/status").jsonObject
 
+    /** Free bytes on each root folder (where the library lives). */
+    suspend fun rootFolderFree(): List<Long> = get("/api/v3/rootfolder").arr.mapNotNull { it.obj.long("freeSpace") }
+
     /** The movie / series, or null when it no longer exists. */
     abstract suspend fun find(id: Long): JsonObject?
     /** Ids of the movie's / series' current files. */

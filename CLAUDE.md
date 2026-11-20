@@ -42,6 +42,12 @@ repo and on the server.
   cancels watched/protected ones, removes due ones (Radarr/Sonarr unmonitor + delete files, then
   torrents with data once seeded `seed_min_days`/`seed_rules`), and finishes seeding torrents.
   Dry run (default on) only writes "would ..." audit lines. Tables `removal`, `removaltorrent`, `audit`.
+- `Suggest.kt`: after each scan (and on settings save) flags removal candidates on `item`
+  (`suggested_at`, `suggest_reason`): scores >= `suggest_min_score`, plus next-highest scorers while
+  free space (min Radarr/Sonarr root folder `freeSpace`, stored as `free_bytes` in the scan summary)
+  + Leaving Soon bytes is under `free_space_goal_gb`; at most `max_suggestions`. Skips protected,
+  leaving, dismissed (`suggest_dismissed`) and titles kept in the last 90 days. Only flags: the owner
+  approves (= mark) on the Library page.
   Tracker URLs carry passkeys: only the host is ever stored (`trackerHost`).
 - `Main.kt`: Ktor routes, cron scheduler (cron-utils, UNIX syntax, server local time), hourly removal timer, `main`.
 - `src/main/resources/static/*.html`: Library, Removals, Settings. Plain HTML+JS, no build step.
@@ -83,7 +89,8 @@ Keep the `PRUNER_*` env prefix and `data/pruner.db` - renaming would orphan exis
 - Runs in **its own Debian LXC** (only that LXC needs a JVM), LAN-only behind the owner's Caddy,
   no login (owner's choice). The owner runs all server commands; give exact commands.
 
-- Removal: the owner picks titles (no auto-selection); 14-day grace in a Leaving Soon Plex
+- Removal: the owner picks titles; automatic suggestions (score threshold + free-space goal, 10 at a
+  time) are only flagged for approval, never marked on their own (owner's choice, Nov 2026); 14-day grace in a Leaving Soon Plex
   collection; automatic removal when it ends, plus "Remove now"; a finished play during the grace
   period keeps it; torrents are deleted only after their seed time.
 

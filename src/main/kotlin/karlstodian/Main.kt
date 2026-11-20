@@ -102,7 +102,7 @@ private val SORTS: Map<String, Pair<(JsonObject) -> Comparable<*>?, Boolean>> = 
 
 private fun tagsOf(i: Item): List<String> = json.parseToJsonElement(i.arr_tags).arr.map { it.jsonPrimitive.content }
 
-private fun inputOf(i: Item, cfg: Settings): ScoreInput {
+fun inputOf(i: Item, cfg: Settings): ScoreInput {
     val tags = tagsOf(i)
     return ScoreInput(i, i.keep || cfg.keep_tag in tags, i.quality_exempt || cfg.quality_ok_tag in tags)
 }
@@ -136,10 +136,11 @@ fun scoredItems(db: Db = Store.db, cfg: Settings = Config.current): List<JsonObj
     return inputs.map { itemOut(it, scores.getValue(it.item.id!!), leaving[it.item.id]) }
 }
 
-/** A scan, then the removal follow-ups (Leaving Soon collection sync). */
+/** A scan, then the removal follow-ups (Leaving Soon collection sync) and fresh suggestions. */
 suspend fun scanAndFollowUp() {
     runScan()
     Removals.afterScan()
+    Suggestions.refresh()
 }
 
 @Suppress("UNCHECKED_CAST")
@@ -217,6 +218,7 @@ fun Application.module() {
             Scheduler.validate(new.scan_cron)
             Config.apply(new)
             Scheduler.reschedule(this@module)
+            Suggestions.refresh() // the threshold, goal or scoring weights may have changed
             call.respond(settingsOut())
         }
 
@@ -285,7 +287,16 @@ fun Application.module() {
             )))
         }
 
-        /** Set the keep / quality-exempt flags (they survive rescans). */
+        /** Suggestion settings and free space, for the Library page. */
+        get("/api/suggestions") { call.respond(Suggestions.info()) }
+
+        /** Recompute the suggestions now (normally done after each scan). */
+        post("/api/suggestions/refresh") {
+            val n = Suggestions.refresh()
+            call.respond(JsonObject(Suggestions.info() + ("suggested" to JsonPrimitive(n))))
+        }
+
+        /** Set the keep / quality-exempt / suggest-dismissed flags (they survive rescans). */
         patch("/api/items/{id}") {
             val id = itemId(call)
             val body = call.body()
@@ -298,6 +309,8 @@ fun Application.module() {
             }
             flag("keep")?.let { item.keep = it }
             flag("quality_exempt")?.let { item.quality_exempt = it }
+            flag("suggest_dismissed")?.let { item.suggest_dismissed = it }
+            if (item.keep || item.suggest_dismissed) Suggestions.clear(item)
             db.saveItem(item)
             if (item.keep && Removals.activeByItem(db)[id]?.state == "leaving") {
                 Removals.cancelForItem(id, "Protected by the owner")

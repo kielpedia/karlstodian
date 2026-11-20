@@ -157,6 +157,9 @@ class Db(path: String) {
             Triple("userplay", "episodes_watched", "INTEGER NOT NULL DEFAULT 0"),
             Triple("item", "plex_section_key", "VARCHAR"),
             Triple("removal", "watch_mark", "INTEGER NOT NULL DEFAULT 0"),
+            Triple("item", "suggest_dismissed", "BOOLEAN NOT NULL DEFAULT 0"),
+            Triple("item", "suggested_at", "DATETIME"),
+            Triple("item", "suggest_reason", "VARCHAR"),
         )
 
         private val SCHEMA = listOf(

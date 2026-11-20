@@ -52,6 +52,11 @@ data class Item(
     // User flags: never overwritten by a scan
     var keep: Boolean = false,
     var quality_exempt: Boolean = false,
+    var suggest_dismissed: Boolean = false, // "don't suggest this again"
+
+    // Suggested for removal by the last suggestion run (see Suggest.kt); the owner approves or dismisses
+    var suggested_at: Instant? = null,
+    var suggest_reason: String? = null,
 
     var last_seen_scan: Long? = null,
 )
