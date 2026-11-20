@@ -73,7 +73,9 @@ object Removals {
                     watch_mark = watchCounter(item),
                 )
                 db.saveRemoval(r)
-                audit(db, r, "marked", if (immediate) "Not in Plex; removing it now" else "Leaving Soon; removal due ${r.remove_after}", now = now)
+                val suggested = item.suggest_reason?.let { "Suggested: $it. " } ?: ""
+                if (item.suggested_at != null) { Suggestions.clear(item); db.saveItem(item) }
+                audit(db, r, "marked", suggested + if (immediate) "Not in Plex; removing it now" else "Leaving Soon; removal due ${r.remove_after}", now = now)
                 marked += r
             }
         }

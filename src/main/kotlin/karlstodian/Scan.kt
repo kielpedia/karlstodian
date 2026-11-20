@@ -52,17 +52,29 @@ fun statFile(path: String, cfg: Settings): FileStat {
 
 // ------------------------------------------------------------------ fetching
 
-private data class RadarrData(val movies: List<JsonObject> = emptyList(), val tags: Map<Long, String> = emptyMap(), val history: List<JsonObject> = emptyList())
+private data class RadarrData(val movies: List<JsonObject> = emptyList(), val tags: Map<Long, String> = emptyMap(),
+                              val history: List<JsonObject> = emptyList(), val free: List<Long> = emptyList())
 private data class SonarrData(val series: List<JsonObject> = emptyList(), val tags: Map<Long, String> = emptyMap(),
-                              val history: List<JsonObject> = emptyList(), val files: Map<Long, List<JsonObject>> = emptyMap())
+                              val history: List<JsonObject> = emptyList(), val files: Map<Long, List<JsonObject>> = emptyMap(),
+                              val free: List<Long> = emptyList())
 private data class PlexData(val movies: List<JsonObject> = emptyList(), val shows: List<JsonObject> = emptyList())
+
+/** Free space is only for the space goal: a failure here shouldn't fail the scan. */
+private suspend fun freeSpace(c: ArrClient): List<Long> = try {
+    c.rootFolderFree()
+} catch (e: CancellationException) {
+    throw e
+} catch (e: Exception) {
+    log.warn("couldn't read free space", e); emptyList()
+}
 
 private suspend fun fetchRadarr(s: Settings): RadarrData {
     if (s.radarr_url.isEmpty()) return RadarrData()
     return RadarrClient(s.radarr_url, s.radarr_api_key).use { c ->
         coroutineScope {
             val m = async { c.movies() }; val t = async { c.tags() }; val h = async { c.importHistory() }
-            RadarrData(m.await(), t.await(), h.await())
+            val f = async { freeSpace(c) }
+            RadarrData(m.await(), t.await(), h.await(), f.await())
         }
     }
 }
@@ -72,8 +84,9 @@ private suspend fun fetchSonarr(s: Settings): SonarrData {
     return SonarrClient(s.sonarr_url, s.sonarr_api_key).use { c ->
         coroutineScope {
             val sr = async { c.series() }; val t = async { c.tags() }; val h = async { c.importHistory() }
+            val f = async { freeSpace(c) }
             val series = sr.await()
-            SonarrData(series, t.await(), h.await(), c.episodeFilesFor(series))
+            SonarrData(series, t.await(), h.await(), c.episodeFilesFor(series), f.await())
         }
     }
 }
@@ -384,7 +397,8 @@ private suspend fun doScan(db: Db, cfg: Settings): JsonObject {
                 save(Db.TORRENTS, Torrent(
                     hash = t.str("hash")!!.lowercase(), name = t.str("name") ?: "", size = t.long("size") ?: 0,
                     ratio = t.double("ratio") ?: 0.0, seeding_time = t.long("seeding_time") ?: 0,
-                    tracker = trackerHost(t.str("tracker")), // host only: the URL carries the passkey category = t.str("category")?.ifEmpty { null },
+                    tracker = trackerHost(t.str("tracker")), // host only: the URL carries the passkey
+                    category = t.str("category")?.ifEmpty { null },
                     state = t.str("state"), added_on = epoch(t["added_on"]), content_path = t.str("content_path"),
                 ))
             }
@@ -395,6 +409,8 @@ private suspend fun doScan(db: Db, cfg: Settings): JsonObject {
         val summary = buildJsonObject {
             put("counts", JsonObject(counts.mapValues { JsonPrimitive(it.value) }))
             put("warnings", JsonObject(w.mapValues { JsonPrimitive(it.value) }))
+            // the tightest root folder (movies and TV usually share one dataset)
+            (radarr.free + sonarr.free).minOrNull()?.let { put("free_bytes", it) }
         }
         run.finished_at = Instant.now()
         run.status = if (w.isEmpty()) "ok" else "partial"

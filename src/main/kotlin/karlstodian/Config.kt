@@ -58,6 +58,12 @@ data class Settings(
     val leaving_soon_title: String = "Leaving Soon", // Plex collection name
     val max_removals_per_run: Int = 25,    // safety cap per automatic run
 
+    // Suggestions (see Suggest.kt): titles flagged after each scan for the owner to approve
+    val auto_suggest: Boolean = true,
+    val suggest_min_score: Double = 75.0,  // flag titles scoring at least this
+    val free_space_goal_gb: Int = 0,       // when free space is under this, flag more top scorers (0 = no goal)
+    val max_suggestions: Int = 10,         // at most this many flagged at a time
+
     val scan_cron: String = "0 4 * * *", // nightly at 04:00; empty string disables
     val verify_ssl: Boolean = true,
     val http_timeout: Double = 60.0,
@@ -77,6 +83,9 @@ data class Settings(
         if (seed_rules.keys.any { it.isBlank() }) throw SettingsError("seed_rules: tracker host can't be blank")
         if (leaving_soon_title.isBlank()) throw SettingsError("leaving_soon_title: can't be blank")
         if (max_removals_per_run < 1) throw SettingsError("max_removals_per_run: must be at least 1")
+        if (suggest_min_score !in 0.0..100.0) throw SettingsError("suggest_min_score: must be between 0 and 100")
+        if (free_space_goal_gb < 0) throw SettingsError("free_space_goal_gb: can't be negative")
+        if (max_suggestions < 1) throw SettingsError("max_suggestions: must be at least 1")
         return copy(
             score_weights = FACTORS.sorted().associateWith { score_weights[it] ?: 0.0 },
             seed_rules = seed_rules.mapKeys { trackerHost(it.key) ?: it.key.trim().lowercase() },
@@ -114,6 +123,7 @@ val GENERAL_FIELDS = listOf(
     "path_maps", "keep_tag", "quality_ok_tag", "low_quality_max_resolution", "scan_cron", "verify_ssl",
     "score_weights", "age_cap_days", "recency_cap_days", "new_grace_days",
     "grace_days", "dry_run", "cancel_on_watch", "seed_min_days", "seed_rules", "leaving_soon_title", "max_removals_per_run",
+    "auto_suggest", "suggest_min_score", "free_space_goal_gb", "max_suggestions",
 )
 
 /** "https://tracker.example:443/abc123passkey/announce" -> "tracker.example". Never keep the passkey. */

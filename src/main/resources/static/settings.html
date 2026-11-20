@@ -120,6 +120,14 @@
       <p class="help">A safety cap; anything over it waits for the next run (hourly).</p>
     </div>
     <div class="card">
+      <label class="check"><input type="checkbox" data-field="auto_suggest"> Suggest titles to remove after each scan</label>
+      <label>Suggest titles scoring at least <input type="number" data-field="suggest_min_score" min="0" max="100" step="1"></label>
+      <label>Free space goal (GB, 0 = none) <input type="number" data-field="free_space_goal_gb" min="0" step="100"></label>
+      <p class="help">When free space (as Radarr/Sonarr report it) is under the goal, the next-highest scores are suggested too, until enough is on its way out.</p>
+      <label>Most titles suggested at a time <input type="number" data-field="max_suggestions" min="1" step="1"></label>
+      <p class="help">Suggestions are only flagged: you approve them on the Library page, and approved ones go through Leaving Soon as usual.</p>
+    </div>
+    <div class="card">
       <label>Keep seeding at least (days) <input type="number" data-field="seed_min_days" min="0" step="1"></label>
       <label>Per tracker (one per line: <code>tracker host = days</code>)
         <textarea data-field="seed_rules" rows="3" placeholder="tracker.example = 30"></textarea>

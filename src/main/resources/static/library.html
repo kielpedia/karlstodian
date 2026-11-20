@@ -44,7 +44,7 @@
   .btn:disabled { opacity: .55; cursor: default; }
 
   /* tiles */
-  .tiles { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 12px; margin-bottom: 20px; }
+  .tiles { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 12px; margin-bottom: 20px; }
   .tile { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; text-align: left; cursor: pointer; }
   .tile:hover { border-color: var(--muted); }
   .tile.on { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
@@ -157,6 +157,13 @@
   td.ck input, th.ck input { width: 16px; height: 16px; accent-color: var(--accent); cursor: pointer; }
   td.ck input:disabled { cursor: default; opacity: .35; }
   .badge.leave { background: var(--err-bg); color: var(--err); }
+  .badge.sugg { background: transparent; color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+  .suggestbox { border: 1px solid var(--accent); border-radius: 9px; padding: 12px 14px; margin-top: 14px; }
+  .suggestbox b { color: var(--accent); }
+  .suggestbox .row { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+  .sugbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; border: 1px solid var(--accent); border-radius: 9px; padding: 9px 14px; font-size: 13px; margin-bottom: 14px; }
+  .sugbar .grow { flex: 1; min-width: 200px; }
+  .linkbtn { background: none; border: 0; padding: 0; color: var(--accent); cursor: pointer; font: inherit; text-decoration: underline; }
   .selbar { position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%); display: flex; align-items: center; gap: 14px;
             background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px 10px 18px;
             box-shadow: 0 6px 24px rgba(0,0,0,.18); z-index: 5; max-width: calc(100vw - 32px); flex-wrap: wrap; }
@@ -171,7 +178,7 @@
   .banner a { color: inherit; font-weight: 600; }
 
   @media (max-width: 980px) {
-    .tiles { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .tiles { grid-template-columns: repeat(4, minmax(0, 1fr)); }
     .col-added { display: none; }
     .weights-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   }
@@ -198,6 +205,7 @@
   </div>
 
   <div class="banner" id="banner" hidden></div>
+  <div class="sugbar" id="sugbar" hidden></div>
   <div class="tiles" id="tiles"></div>
 
   <div class="filters">
@@ -209,6 +217,7 @@
     <button class="chip" data-f="lowq">Low quality</button>
     <button class="chip" data-f="noplex">Not in Plex</button>
     <button class="chip" data-f="kept">Protected / exempt</button>
+    <button class="chip" data-f="suggested">Suggested</button>
     <button class="chip" data-f="leaving">Leaving Soon</button>
     <button class="chip" id="weights-btn">Scoring weights</button>
   </div>
@@ -257,6 +266,7 @@ const PAGE = 200;
 let items = [], lowRes = 720;
 let state = { kind: "", q: "", f: new Set(), sort: "score", dir: -1, shown: PAGE, openId: null, sel: new Set() };
 let removalInfo = { dry_run: true, grace_days: 14, plex_sync_error: null };
+let suggestInfo = null; // GET /api/suggestions
 const FACTOR_INFO = {
   size: ["Size", "Bigger titles score higher"],
   age: ["Age", "Longer on Plex scores higher"],
@@ -336,7 +346,8 @@ const isLeaving = i => !!i.removal;
 const canMark = i => i.in_plex && !i.keep_effective && !i.removal;
 const canRemoveNow = i => !i.in_plex && !i.keep_effective && !i.removal; // nobody can watch it, so no grace period
 const canSelect = i => canMark(i) || canRemoveNow(i);
-const FILTERS = { never: isNever, lowq: i => isLow(i) && !i.quality_exempt_effective, noplex: i => !i.in_plex, kept: isKept, leaving: isLeaving };
+const isSuggested = i => !!i.suggested_at && canMark(i);
+const FILTERS = { never: isNever, lowq: i => isLow(i) && !i.quality_exempt_effective, noplex: i => !i.in_plex, kept: isKept, leaving: isLeaving, suggested: isSuggested };
 function untilText(iso) {
   const d = (new Date(iso) - Date.now()) / 864e5;
   if (d <= 0) return "due now";
@@ -348,6 +359,7 @@ async function loadRemovalInfo() {
     const r = await api("GET", "/api/removals");
     removalInfo = { dry_run: r.dry_run, grace_days: r.grace_days, plex_sync_error: r.plex_sync_error };
   } catch {}
+  try { suggestInfo = await api("GET", "/api/suggestions"); } catch {}
   renderBanner();
 }
 function renderBanner() {
@@ -356,6 +368,21 @@ function renderBanner() {
   if (removalInfo.plex_sync_error) msgs.push(esc(removalInfo.plex_sync_error));
   b.hidden = !msgs.length;
   b.innerHTML = msgs.join("<br>");
+}
+function renderSugbar() {
+  const bar = $("#sugbar"), sg = items.filter(isSuggested), si = suggestInfo;
+  const goal = si && si.goal_bytes, free = si && si.free_bytes;
+  const short = goal && free !== null && free !== undefined && free < goal;
+  const space = goal && free !== null && free !== undefined
+    ? ` Free space: <b>${bytes(free)}</b> of a ${bytes(goal)} goal${si.leaving_bytes ? `, ${bytes(si.leaving_bytes)} more on its way out` : ""}.` : "";
+  bar.hidden = !sg.length && !short;
+  if (bar.hidden) return;
+  const filtered = state.f.size === 1 && state.f.has("suggested");
+  bar.innerHTML = `<span class="grow">${sg.length
+      ? `<b>${sg.length} title${sg.length === 1 ? "" : "s"}</b> (${bytes(sg.reduce((s, i) => s + i.size_bytes, 0))}) suggested for removal.`
+      : "Nothing left to suggest."}${space}</span>` +
+    (sg.length && !filtered ? `<button class="btn" data-sug-show>Review</button>` : "") +
+    (sg.length ? `<button class="btn danger" data-sug-all>Approve all</button>` : "");
 }
 const SORTERS = {
   score: i => liveScore(i),
@@ -392,7 +419,7 @@ function tile(key, label, value, sub, on) {
 function renderTiles() {
   const sum = a => a.reduce((s, i) => s + i.size_bytes, 0);
   const mv = items.filter(i => i.kind === "movie"), sh = items.filter(i => i.kind === "show");
-  const nv = items.filter(isNever), lq = items.filter(FILTERS.lowq), lv = items.filter(isLeaving);
+  const nv = items.filter(isNever), lq = items.filter(FILTERS.lowq), lv = items.filter(isLeaving), sg = items.filter(isSuggested);
   const next = lv.map(i => i.removal.remove_after).sort()[0];
   const lqBytes = lq.reduce((s, i) => s + i.low_quality_bytes, 0);
   const onlyKind = k => state.kind === k && state.f.size === 0;
@@ -403,7 +430,8 @@ function renderTiles() {
     tile("show", "Shows", bytes(sum(sh)), `${sh.length} series`, onlyKind("show")) +
     tile("never", "Never played", bytes(sum(nv)), `${nv.length} titles`, onlyF("never")) +
     tile("lowq", `${lowRes}p or lower`, bytes(lqBytes), `in ${lq.length} titles`, onlyF("lowq")) +
-    tile("leaving", "Leaving Soon", bytes(sum(lv)), lv.length ? `${lv.length} titles · next ${untilText(next)}` : "none listed", onlyF("leaving"));
+    tile("suggested", "Suggested", bytes(sum(sg)), sg.length ? `${sg.length} to review` : "none right now", onlyF("suggested")) +
+    tile("leaving", "Leaving Soon", bytes(sum(lv)), lv.length ? `${lv.length} title${lv.length === 1 ? "" : "s"} · next ${untilText(next)}` : "none listed", onlyF("leaving"));
 }
 
 function row(i, maxSize) {
@@ -412,6 +440,7 @@ function row(i, maxSize) {
     i.kind === "show" ? `<span class="badge">Show</span>` : "",
     !i.in_plex ? `<span class="badge warn">Not in Plex</span>` : "",
     i.keep_effective ? `<span class="badge ok">Protected</span>` : "",
+    isSuggested(i) ? `<span class="badge sugg" title="${esc(i.suggest_reason || "")}">Suggested</span>` : "",
     i.removal ? `<span class="badge leave" title="Removal due ${esc(date(i.removal.remove_after))}">Leaving ${untilText(i.removal.remove_after)}</span>` : "",
   ].join("");
   const ck = `<td class="ck"><input type="checkbox" data-ck="${i.id}" ${state.sel.has(i.id) ? "checked" : ""} ${canSelect(i) ? "" : "disabled"}
@@ -454,6 +483,7 @@ function render() {
   $$("#kind button").forEach(b => b.classList.toggle("on", b.dataset.kind === state.kind));
   $$(".chip").forEach(c => c.classList.toggle("on", state.f.has(c.dataset.f)));
   renderTiles();
+  renderSugbar();
   renderSel(v);
 }
 
@@ -486,7 +516,7 @@ async function markForRemoval(ids) {
     if (refused.length) alert(`Not listed:\n` + refused.map(([id, why]) => `${(items.find(i => i.id === +id) || {}).title || id}: ${why}`).join("\n"));
   } catch (e) { alert(`Couldn't mark: ${e.message}`); return false; }
   for (const id of ids) state.sel.delete(id);
-  await loadItems(); render();
+  await loadItems(); await loadRemovalInfo(); render();
   return true;
 }
 
@@ -564,7 +594,10 @@ async function openItem(id) {
     ${d.removal ? `<div class="leavebox"><b>Leaving Soon</b> · removal due ${esc(date(d.removal.remove_after))} (${untilText(d.removal.remove_after)})
         <div class="muted">It's in the Leaving Soon collection in Plex. If anyone finishes watching it before then, it stays.</div>
         <div class="row"><button class="btn" data-keep="${d.removal.id}">Keep it</button><button class="btn danger" data-remove-now="${d.removal.id}">Remove now</button></div></div>`
-      : canMark(d) ? `<div class="markbox"><span>Put it in Leaving Soon; it's removed after ${removalInfo.grace_days} days unless someone watches it.</span>
+      : isSuggested(d) ? `<div class="suggestbox"><b>Suggested for removal</b> · ${esc(d.suggest_reason || "")}
+        <div class="muted">Approve puts it in Leaving Soon for ${removalInfo.grace_days} days. Dismiss and it won't be suggested again.</div>
+        <div class="row"><button class="btn danger" data-mark="${d.id}">Approve</button><button class="btn" data-dismiss="${d.id}">Dismiss</button></div></div>`
+      : canMark(d) ? `${d.suggest_dismissed ? `<p class="muted">You dismissed this from suggestions. <button class="linkbtn" data-undismiss="${d.id}">Allow suggesting it again</button></p>` : ""}<div class="markbox"><span>Put it in Leaving Soon; it's removed after ${removalInfo.grace_days} days unless someone watches it.</span>
         <button class="btn danger" data-mark="${d.id}">Mark for removal</button></div>`
       : canRemoveNow(d) ? `<div class="markbox"><span>Nobody can watch it in Plex, so it skips Leaving Soon and is removed right away.</span>
         <button class="btn danger" data-now="${d.id}">Remove now</button></div>` : ""}
@@ -738,6 +771,11 @@ const selIds = f => items.filter(i => state.sel.has(i.id) && f(i)).map(i => i.id
 $("#sel-mark").onclick = async () => { const b = $("#sel-mark"); b.disabled = true; await markForRemoval(selIds(canMark)); b.disabled = false; };
 $("#sel-now").onclick = async () => { const b = $("#sel-now"); b.disabled = true; await removeNotInPlex(selIds(canRemoveNow)); b.disabled = false; };
 $("#more").onclick = () => { state.shown += PAGE; render(); };
+$("#sugbar").onclick = async e => {
+  if (e.target.closest("[data-sug-show]")) { state.f.clear(); state.kind = ""; state.f.add("suggested"); state.shown = PAGE; render(); }
+  const all = e.target.closest("[data-sug-all]");
+  if (all) { all.disabled = true; await markForRemoval(items.filter(isSuggested).map(i => i.id)); all.disabled = false; }
+};
 $("#shade").onclick = closeDrawer;
 $("#drawer").addEventListener("click", async e => {
   if (e.target.closest("[data-close]")) return closeDrawer();
@@ -745,6 +783,13 @@ $("#drawer").addEventListener("click", async e => {
   if (m) { m.disabled = true; if (await markForRemoval([+m.dataset.mark])) openItem(+m.dataset.mark); else m.disabled = false; }
   const nw = e.target.closest("[data-now]");
   if (nw) { nw.disabled = true; if (await removeNotInPlex([+nw.dataset.now])) openItem(+nw.dataset.now); else nw.disabled = false; }
+  const ds = e.target.closest("[data-dismiss], [data-undismiss]");
+  if (ds) {
+    ds.disabled = true;
+    const id = +(ds.dataset.dismiss || ds.dataset.undismiss);
+    try { await api("PATCH", `/api/items/${id}`, { suggest_dismissed: !!ds.dataset.dismiss }); } catch (err) { alert(err.message); }
+    await loadItems(); render(); openItem(id);
+  }
   const k = e.target.closest("[data-keep]");
   if (k) { k.disabled = true; await keepIt(+k.dataset.keep); }
   const rn = e.target.closest("[data-remove-now]");
