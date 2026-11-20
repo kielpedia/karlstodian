@@ -41,8 +41,15 @@ object Removals {
 
     data class MarkResult(val marked: List<Removal>, val refused: Map<Long, String>)
 
-    /** Put titles on the Leaving Soon list. Protected, unmatched and already-listed titles are refused. */
-    fun mark(itemIds: List<Long>, db: Db = Store.db, cfg: Settings = Config.current, now: Instant = Instant.now()): MarkResult {
+    /**
+     * Put titles on the Leaving Soon list. Protected, unmatched and already-listed titles are refused.
+     * [immediate] is for titles that aren't in Plex (nobody can watch them, so there's no grace period):
+     * only those are accepted, due right away; the caller removes them.
+     */
+    fun mark(
+        itemIds: List<Long>, db: Db = Store.db, cfg: Settings = Config.current, now: Instant = Instant.now(),
+        immediate: Boolean = false,
+    ): MarkResult {
         val marked = mutableListOf<Removal>()
         val refused = linkedMapOf<Long, String>()
         db.tx {
@@ -52,7 +59,8 @@ object Removals {
                 val why = when {
                     item == null -> "not found"
                     keepEffective(item, cfg) -> "protected"
-                    !item.in_plex -> "not in Plex"
+                    !immediate && !item.in_plex -> "not in Plex"
+                    immediate && item.in_plex -> "in Plex, so it goes through Leaving Soon"
                     id in active -> "already leaving"
                     else -> null
                 }
@@ -60,11 +68,12 @@ object Removals {
                 item!!
                 val r = Removal(
                     item_key = item.key, item_id = id, kind = item.kind, title = item.title, year = item.year,
-                    size_bytes = item.size_bytes, marked_at = now, remove_after = now.plus(Duration.ofDays(cfg.grace_days.toLong())),
+                    size_bytes = item.size_bytes, marked_at = now,
+                    remove_after = if (immediate) now else now.plus(Duration.ofDays(cfg.grace_days.toLong())),
                     watch_mark = watchCounter(item),
                 )
                 db.saveRemoval(r)
-                audit(db, r, "marked", "Leaving Soon; removal due ${r.remove_after}", now = now)
+                audit(db, r, "marked", if (immediate) "Not in Plex; removing it now" else "Leaving Soon; removal due ${r.remove_after}", now = now)
                 marked += r
             }
         }

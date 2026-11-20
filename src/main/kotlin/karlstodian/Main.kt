@@ -326,13 +326,20 @@ fun Application.module() {
 
         /** Put titles on the Leaving Soon list: {"item_ids": [1, 2]} */
         post("/api/removals") {
-            val ids = (call.body()["item_ids"] as? JsonArray)?.map {
+            val body = call.body()
+            val ids = (body["item_ids"] as? JsonArray)?.map {
                 it.jsonPrimitive.longOrNull ?: throw HttpError(HttpStatusCode.UnprocessableEntity, "item_ids must be numbers")
             } ?: throw HttpError(HttpStatusCode.UnprocessableEntity, "item_ids is required")
-            val res = Removals.mark(ids)
-            if (res.marked.isNotEmpty()) this@module.launch { Removals.syncSafely() }
+            // "now": titles that aren't in Plex are removed right away (still a dry run while dry run is on)
+            val now = (body["now"] as? JsonPrimitive)?.booleanOrNull == true
+            val res = Removals.mark(ids, immediate = now)
+            val marked = if (now) res.marked.map { r ->
+                // the hourly run may have got to it first; then report what it did
+                try { Removals.removeNow(r.id!!) } catch (e: HttpError) { Store.db.removal(r.id!!)!! }
+            }
+            else res.marked.also { if (it.isNotEmpty()) this@module.launch { Removals.syncSafely() } }
             call.respond(buildJsonObject {
-                put("marked", JsonArray(res.marked.map { removalOut(it) }))
+                put("marked", JsonArray(marked.map { removalOut(it) }))
                 put("refused", JsonObject(res.refused.mapKeys { it.key.toString() }.mapValues { JsonPrimitive(it.value) }))
             })
         }

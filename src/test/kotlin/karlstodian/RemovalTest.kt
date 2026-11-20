@@ -294,4 +294,28 @@ class RemovalTest {
         assertEquals(0, r.obj().int("removed"))
         assertEquals(HttpStatusCode.OK, client.get("/removals").status)
     }
+
+    // ------------------------------------------------------------------ not in Plex
+
+    @Test fun notInPlexSkipsLeavingSoon() {
+        val m = movie(); m.in_plex = false; db.saveItem(m)
+        assertEquals("not in Plex", Removals.mark(listOf(m.id!!)).refused[m.id!!])
+        val res = Removals.mark(listOf(m.id!!, show().id!!), now = t0, immediate = true)
+        assertEquals(mapOf(show().id!! to "in Plex, so it goes through Leaving Soon"), res.refused)
+        assertEquals(t0, res.marked.single().remove_after) // due right away, no grace period
+    }
+
+    @Test fun removeNotInPlexApi() = withApp {
+        settings("dry_run" to false)
+        seeded(30)
+        val m = movie(); m.in_plex = false; db.saveItem(m)
+        val r = client.send(HttpMethod.Post, "/api/removals", """{"item_ids": [${m.id}, ${show().id}], "now": true}""").obj()
+        assertEquals("done", r["marked"]!!.jsonArray.single().jsonObject.str("state"))
+        assertEquals(setOf(show().id.toString()), r["refused"]!!.jsonObject.keys)
+        assertEquals(listOf(
+            """PUT radarr/api/v3/movie/editor {"movieIds":[10],"monitored":false}""",
+            """DELETE radarr/api/v3/moviefile/bulk {"movieFileIds":[1]}""",
+            "POST qbit/api/v2/torrents/delete hashes=abc123&deleteFiles=true",
+        ), env.writes) // and nothing to Plex
+    }
 }
