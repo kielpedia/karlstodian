@@ -1,0 +1,7 @@
+# Only the build inputs go into the image. data/ holds API keys: never in an image.
+*
+!gradlew
+!gradle/
+!settings.gradle.kts
+!build.gradle.kts
+!src/

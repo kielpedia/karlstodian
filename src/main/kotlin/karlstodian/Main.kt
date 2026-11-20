@@ -190,6 +190,7 @@ fun Application.module() {
 
     fun settingsOut() = buildJsonObject {
         put("values", Config.publicView())
+        put("env_fields", JsonArray(Config.envFields.sorted().map(::JsonPrimitive)))
         put("next_scan", Scheduler.nextRun?.toOffsetDateTime()?.toString())
     }
 
@@ -378,8 +379,17 @@ fun main(args: Array<String>) {
         "check" -> return runCheckCli()
         "scan" -> return runScanCli()
     }
-    val host = System.getenv("PRUNER_HOST") ?: "127.0.0.1"
-    val port = System.getenv("PRUNER_PORT")?.toIntOrNull() ?: 8000
-    log.info("Karlstodian $APP_VERSION on http://$host:$port")
-    embeddedServer(CIO, host = host, port = port, module = Application::module).start(wait = true)
+    fun env(name: String) = System.getenv("KARLSTODIAN_$name") ?: System.getenv("PRUNER_$name")
+    val host = env("HOST") ?: "127.0.0.1"
+    val port = env("PORT")?.toIntOrNull() ?: 8000
+    log.info("Karlstodian $APP_VERSION on http://$host:$port, data in ${Config.settingsFile().parent}")
+    val server = embeddedServer(CIO, host = host, port = port, module = Application::module)
+    // SIGTERM (docker stop, Kubernetes): finish in-flight requests, stop the timers and scans, close SQLite.
+    Runtime.getRuntime().addShutdownHook(Thread({
+        log.info("Shutting down")
+        server.stop(gracePeriodMillis = 1_000, timeoutMillis = 10_000)
+        Store.reset()
+        log.info("Stopped cleanly")
+    }, "shutdown"))
+    server.start(wait = true)
 }

@@ -63,3 +63,85 @@ jobs:
           gh release create "$TAG" build/libs/karlstodian.jar build/libs/karlstodian.jar.sha256 \
             --target "$GITHUB_SHA" --title "$TAG" \
             --notes "Built from ${GITHUB_SHA::7}: $(git log -1 --format=%s)"
+
+  # The container image. Built and smoke-tested on every PR. Merges to main push
+  # ghcr.io/<owner>/karlstodian:main, :<full commit sha> and :build-<n> (same number as the jar release),
+  # with a signed build-provenance attestation. A PR can't produce an attestation for refs/heads/main,
+  # so deployments verify: gh attestation verify --source-ref refs/heads/main.
+  image:
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write      # push to ghcr.io
+      id-token: write      # sign the provenance attestation
+      attestations: write
+    env:
+      PUBLISH: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+      VERSION: build-${{ github.run_number }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/metadata-action@v6
+        id: meta
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=sha,format=long,prefix=
+            type=raw,value=main
+            type=raw,value=${{ env.VERSION }}
+          labels: |
+            org.opencontainers.image.version=${{ env.VERSION }}
+      - name: Build
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          load: true
+          tags: karlstodian:ci
+          build-args: APP_VERSION=${{ env.VERSION }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Smoke test
+        run: |
+          set -x
+          test "$(docker inspect -f '{{.Config.User}}' karlstodian:ci)" = 1000:1000
+          mkdir data && sudo chown 1000:1000 data
+          docker run -d --name karlstodian-ci -p 8000:8000 -v "$PWD/data:/data" \
+            -e KARLSTODIAN_RADARR_URL=http://radarr.invalid -e KARLSTODIAN_RADARR_API_KEY=from-env karlstodian:ci
+          for i in $(seq 1 60); do curl -fsS http://127.0.0.1:8000/healthz && break; sleep 2; done
+          curl -fsS http://127.0.0.1:8000/healthz | grep -q "\"$VERSION\""
+          curl -fsS -o /dev/null http://127.0.0.1:8000/library
+          # settings from the environment show as locked and their secret never reaches the browser
+          curl -fsS http://127.0.0.1:8000/api/settings > settings.out
+          python3 -c 'import json,sys; d=json.load(open("settings.out")); assert d["env_fields"] == ["radarr_api_key", "radarr_url"], d["env_fields"]'
+          if grep -q from-env settings.out; then echo "secret leaked"; exit 1; fi
+          sudo test -f data/pruner.db
+          # clean shutdown on SIGTERM
+          docker stop -t 20 karlstodian-ci
+          docker logs karlstodian-ci 2>&1 | tee app.log | tail -5
+          grep -q "Stopped cleanly" app.log
+      - name: Log in to GHCR
+        if: env.PUBLISH == 'true'
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: Publish
+        id: publish
+        if: env.PUBLISH == 'true'
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: APP_VERSION=${{ env.VERSION }}
+          cache-from: type=gha
+      - name: Attest the main image
+        if: env.PUBLISH == 'true'
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-name: ghcr.io/${{ github.repository }}
+          subject-digest: ${{ steps.publish.outputs.digest }}
+          push-to-registry: true

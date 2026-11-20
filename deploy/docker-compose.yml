@@ -1,0 +1,21 @@
+# Karlstodian with Docker Compose. See deploy/DOCKER.md.
+#   docker compose up -d        then open http://<host>:8000/settings
+services:
+  karlstodian:
+    image: ghcr.io/kielpedia/karlstodian:main   # or pin a commit: :<sha> / :build-<n>
+    container_name: karlstodian
+    restart: unless-stopped
+    stop_grace_period: 20s
+    ports:
+      - "8000:8000"            # LAN only: Karlstodian has no login
+    environment:
+      TZ: Etc/UTC              # your timezone; the scan schedule (cron) uses it
+      # Optional: settings from the environment instead of the Settings page (locked there).
+      # KARLSTODIAN_RADARR_URL: http://radarr:7878
+      # KARLSTODIAN_RADARR_API_KEY: ...
+    volumes:
+      - ./data:/data           # settings.json + pruner.db; owned by uid 1000
+      # Optional, read-only: the media share, for hardlink link counts. At /mnt it matches
+      # Radarr/Sonarr/qBittorrent paths under /mnt; elsewhere, set Path mappings.
+      # - /mnt/media-share:/mnt:ro
+    mem_limit: 512m
