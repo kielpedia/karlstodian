@@ -153,6 +153,7 @@ const SERVICES = [
 ];
 const SECRETS = new Set(["plex_token", "tautulli_api_key", "radarr_api_key", "sonarr_api_key", "qbit_password"]);
 let saved = {};          // values as last loaded from the server
+let envFields = new Set(); // set by environment variables on the server: shown, not editable
 let clears = new Set();  // secrets the user asked to remove
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
@@ -195,11 +196,14 @@ function fill() {
   for (const el of $$("[data-field]")) {
     const f = el.dataset.field, v = saved[f];
     el.classList.remove("dirty");
+    el.disabled = envFields.has(f);
+    el.title = envFields.has(f) ? `Set on the server by the environment variable KARLSTODIAN_${f.toUpperCase()} (or PRUNER_${f.toUpperCase()})` : "";
     if (SECRETS.has(f)) {
       el.value = "";
       const isSet = v && v.set && !clears.has(f);
-      el.placeholder = clears.has(f) ? "Will be removed on save" : isSet ? "•••••••• (saved)" : "Not set";
-      const btn = $(`[data-clear="${f}"]`); if (btn) btn.hidden = !(v && v.set) || clears.has(f);
+      el.placeholder = envFields.has(f) ? (isSet ? "•••••••• (from the environment)" : "Not set (environment)")
+        : clears.has(f) ? "Will be removed on save" : isSet ? "•••••••• (saved)" : "Not set";
+      const btn = $(`[data-clear="${f}"]`); if (btn) btn.hidden = !(v && v.set) || clears.has(f) || envFields.has(f);
     } else if (el.type === "checkbox") el.checked = !!v;
     else if (f === "path_maps") el.value = pathMapsToText(v);
     else if (f === "seed_rules") el.value = seedRulesToText(v);
@@ -292,7 +296,7 @@ function setNextScan(iso) {
 
 async function load() {
   const data = await api("GET", "/api/settings");
-  saved = data.values; clears.clear(); fill(); setNextScan(data.next_scan);
+  saved = data.values; envFields = new Set(data.env_fields || []); clears.clear(); fill(); setNextScan(data.next_scan);
 }
 
 async function save() {
@@ -302,7 +306,7 @@ async function save() {
   $("#save").disabled = true;
   try {
     const data = await api("PUT", "/api/settings", body);
-    saved = data.values; clears.clear(); fill(); setNextScan(data.next_scan);
+    saved = data.values; envFields = new Set(data.env_fields || []); clears.clear(); fill(); setNextScan(data.next_scan);
     updateBar("Saved", "ok");
     for (const card of $$("[data-service]")) if (touched.has(card.dataset.service) || "verify_ssl" in body) testCard(card);
   } catch (e) { updateBar(e.message, "err"); $("#save").disabled = false; }

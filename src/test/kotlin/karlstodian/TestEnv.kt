@@ -4,6 +4,7 @@ import io.ktor.client.engine.mock.*
 import io.ktor.client.request.forms.*
 import io.ktor.http.*
 import io.ktor.http.content.*
+import kotlinx.serialization.json.*
 import java.nio.file.Files
 import java.nio.file.Path
 
@@ -31,16 +32,17 @@ class TestEnv {
         Files.createLink(media.resolve("library/Show B/S01E01.mkv"), ep)
 
         Store.reset()
-        Config.reload(mapOf(
-            "PRUNER_DB_PATH" to dir.resolve("t.db").toString(),
-            "PRUNER_PLEX_URL" to "http://plex", "PRUNER_PLEX_TOKEN" to "t",
-            "PRUNER_TAUTULLI_URL" to "http://tautulli", "PRUNER_TAUTULLI_API_KEY" to "k",
-            "PRUNER_RADARR_URL" to "http://radarr", "PRUNER_RADARR_API_KEY" to "k",
-            "PRUNER_SONARR_URL" to "http://sonarr", "PRUNER_SONARR_API_KEY" to "k",
-            "PRUNER_QBIT_URL" to "http://qbit", "PRUNER_QBIT_USERNAME" to "u", "PRUNER_QBIT_PASSWORD" to "p",
-            "PRUNER_PATH_MAPS" to """[["/data", "${media.toString().replace('\\', '/')}"]]""",
-            "PRUNER_SCAN_CRON" to "",
-        ))
+        // Saved settings, as the settings page would leave them (environment variables would lock them)
+        Files.writeString(dir.resolve("settings.json"), buildJsonObject {
+            put("plex_url", "http://plex"); put("plex_token", "t")
+            put("tautulli_url", "http://tautulli"); put("tautulli_api_key", "k")
+            put("radarr_url", "http://radarr"); put("radarr_api_key", "k")
+            put("sonarr_url", "http://sonarr"); put("sonarr_api_key", "k")
+            put("qbit_url", "http://qbit"); put("qbit_username", "u"); put("qbit_password", "p")
+            putJsonArray("path_maps") { addJsonArray { add("/data"); add(media.toString().replace('\\', '/')) } }
+            put("scan_cron", "")
+        }.toString())
+        Config.reload(mapOf("PRUNER_DB_PATH" to dir.resolve("t.db").toString()))
         Http.engineOverride = MockEngine { req ->
             val key = req.url.host to req.url.encodedPath
             if (req.method != HttpMethod.Get && key.second != "/api/v2/auth/login") {

@@ -26,4 +26,4 @@ Needs Java 21.
 
 Server install (Debian LXC, systemd, automatic updates from releases): see `deploy/DEPLOY.md`.
 
-Docker: `ghcr.io/kielpedia/karlstodian:latest`, with a compose file; see `deploy/DOCKER.md`.
+Docker / Kubernetes: `ghcr.io/kielpedia/karlstodian:main` (plus a tag per commit); see `deploy/DOCKER.md`.

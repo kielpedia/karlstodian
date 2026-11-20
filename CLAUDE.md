@@ -19,8 +19,9 @@ repo and on the server.
 - Tests: `gradlew test` (12 tests; inode/link-count/file-mode asserts only run on Linux).
 - CLI: `gradlew run --args=check` (test connections), `gradlew run --args=scan` (one scan).
 - Deployable: `gradlew buildFatJar` -> `build/libs/karlstodian.jar`, run with `java -jar`.
-- Env: `PRUNER_HOST` (default 127.0.0.1; 0.0.0.0 on the server), `PRUNER_PORT` (8000),
-  `PRUNER_DB_PATH`, and any setting as `PRUNER_<FIELD>` (lists/maps as JSON).
+- Env: prefix `KARLSTODIAN_` or `PRUNER_` (KARLSTODIAN_ wins). `HOST` (default 127.0.0.1), `PORT` (8000),
+  `KARLSTODIAN_DATA` (data folder) or `DB_PATH`, and any setting as `<PREFIX><FIELD>` (lists/maps as JSON).
+  A setting set by env wins over settings.json, is locked in the UI and never written to the file (`Config.envFields`).
 
 ## Layout (src/main/kotlin/karlstodian)
 
@@ -57,10 +58,11 @@ Keep the `PRUNER_*` env prefix and `data/pruner.db` - renaming would orphan exis
   back to the previous jar if it doesn't come up. It skips a round while a scan is running.
   So **merging to `main` deploys**. Rollback = `git revert` on `main`, which ships a new release.
   A release that fails its health check is recorded in `/opt/karlstodian/FAILED_VERSION` and not retried.
-- Container: `Dockerfile` (multi-stage, runs as uid 10001, data in `/data`), `deploy/docker-compose.yml`,
-  `deploy/DOCKER.md`. CI's `image` job builds and smoke-tests it on every PR and pushes
-  `ghcr.io/kielpedia/karlstodian:build-<n>` + `:latest` (with attestation) on `main`. The owner's
-  server still runs the LXC install; the image is an alternative, not what's deployed.
+- Container (for the owner's Kubernetes): `Dockerfile` (multi-stage, uid/gid 1000, `KARLSTODIAN_DATA=/data`,
+  MaxRAMPercentage=75, clean SIGTERM shutdown), `deploy/docker-compose.yml`, `deploy/DOCKER.md`.
+  CI's `image` job smoke-tests it on every PR and, on `main`, pushes `:main`, `:<full sha>` and
+  `:build-<n>` with a build-provenance attestation (homelab-infra verifies `--source-ref refs/heads/main`
+  and `--signer-workflow .../ci.yml`, so keep the job in `ci.yml`).
 - `deploy/install-karlstodian.sh` is the one-time (re)install: Java 21, `/opt/karlstodian`, the
   `karlstodian` service and the updater timer. See `deploy/DEPLOY.md`.
 

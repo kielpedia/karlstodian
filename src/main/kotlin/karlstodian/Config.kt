@@ -7,8 +7,11 @@ import java.nio.file.*
 import java.nio.file.attribute.PosixFilePermissions
 
 /**
- * Settings. Defaults come from environment variables / .env (prefix PRUNER_). Anything saved
- * through the settings page is stored in settings.json next to the database and takes precedence.
+ * Settings. Saved through the settings page in settings.json next to the database.
+ * Environment variables (prefix PRUNER_ or KARLSTODIAN_, also read from .env) win over
+ * settings.json: a field set that way is locked on the settings page and never written to
+ * settings.json, so keys can come from a Kubernetes Secret and be rotated there.
+ * KARLSTODIAN_DATA=/data puts the database (and so settings.json) in that folder.
  *
  * Field names are snake_case on purpose: they are the JSON keys in settings.json, the env var
  * suffixes and the API's field names, all shared with the earlier Python version.
@@ -124,6 +127,15 @@ val EDITABLE: List<String> = SERVICES.values.flatten() + GENERAL_FIELDS
 
 /** Holds the live settings. Everything reads `Config.current`, so a save takes effect at once. */
 object Config {
+    // declared before `current`: load() below uses them while the object initializes
+    /** Both prefixes work; KARLSTODIAN_ wins when both set the same field. */
+    private val PREFIXES = listOf("PRUNER_", "KARLSTODIAN_")
+
+    /** Editable fields set by environment variables: they win over settings.json and can't be changed in the UI. */
+    @Volatile
+    var envFields: Set<String> = emptySet()
+        private set
+
     @Volatile
     var current: Settings = load()
 
@@ -135,10 +147,11 @@ object Config {
     fun settingsFile(s: Settings = current): Path = Paths.get(s.db_path).toAbsolutePath().parent.resolve("settings.json")
 
     private fun load(env: Map<String, String> = System.getenv()): Settings {
-        val base = fromEnv(dotEnv() + env.filterKeys { it.startsWith(PREFIX) })
+        val (base, fromEnvFields) = fromEnv(dotEnv() + env.filterKeys { k -> PREFIXES.any { k.startsWith(it) } })
+        envFields = fromEnvFields intersect EDITABLE.toSet()
         val file = settingsFile(base)
         if (!Files.exists(file)) return base
-        val saved = json.parseToJsonElement(Files.readString(file)).jsonObject.filterKeys { it in EDITABLE }
+        val saved = json.parseToJsonElement(Files.readString(file)).jsonObject.filterKeys { it in EDITABLE && it !in envFields }
         return decode(JsonObject(json.encodeToJsonElement(base).jsonObject + saved))
     }
 
@@ -166,6 +179,7 @@ object Config {
         val cur = current
         val merged = json.encodeToJsonElement(cur).jsonObject.toMutableMap()
         for ((k, v0) in updates) {
+            if (k in envFields) continue // set by an environment variable
             var v = v0
             if (k in SECRET_FIELDS && (v is JsonNull || (v is JsonPrimitive && v.isString && v.content.isEmpty()))) continue
             if (v is JsonPrimitive && v.isString) {
@@ -178,7 +192,7 @@ object Config {
             }
             merged[k] = v
         }
-        for (k in clear intersect SECRET_FIELDS) merged[k] = JsonPrimitive("")
+        for (k in (clear intersect SECRET_FIELDS) - envFields) merged[k] = JsonPrimitive("")
 
         for ((svc, fields) in SERVICES) {
             val urlF = fields.first()
@@ -205,7 +219,7 @@ object Config {
         val path = settingsFile()
         Files.createDirectories(path.parent)
         val all = json.encodeToJsonElement(current).jsonObject
-        val data = JsonObject(EDITABLE.associateWith { all[it]!! })
+        val data = JsonObject((EDITABLE - envFields).associateWith { all[it]!! }) // env values stay out of the file
         val tmp = path.resolveSibling("settings.tmp")
         Files.deleteIfExists(tmp)
         createPrivateFile(tmp)
@@ -229,23 +243,26 @@ object Config {
         throw SettingsError(e.message?.lineSequence()?.first() ?: "invalid value")
     }
 
-    private const val PREFIX = "PRUNER_"
-
-    /** PRUNER_* variables -> Settings. List/map values are JSON, as in .env.example. */
-    private fun fromEnv(vars: Map<String, String>): Settings {
+    /** PRUNER_* / KARLSTODIAN_* variables -> Settings, plus which fields they set. Lists/maps are JSON. */
+    private fun fromEnv(vars: Map<String, String>): Pair<Settings, Set<String>> {
         val defaults = json.encodeToJsonElement(Settings()).jsonObject
         val obj = defaults.toMutableMap()
-        for ((k, raw) in vars) {
-            if (!k.startsWith(PREFIX)) continue
-            val field = k.removePrefix(PREFIX).lowercase()
+        val set = mutableSetOf<String>()
+        val ordered = PREFIXES.flatMap { p -> vars.filterKeys { it.startsWith(p) }.map { (k, v) -> k.removePrefix(p) to v } }
+        for ((name, raw) in ordered) {
+            val field = name.lowercase()
             val def = defaults[field] ?: continue
+            set += field
             obj[field] = when {
                 def is JsonPrimitive && def.isString -> JsonPrimitive(raw)
                 def is JsonPrimitive && def.booleanOrNull != null -> JsonPrimitive(raw.trim().lowercase() in setOf("1", "true", "yes", "on"))
                 else -> json.parseToJsonElement(raw) // numbers, lists, maps
             }
         }
-        return decode(JsonObject(obj))
+        // KARLSTODIAN_DATA: the data folder (database + settings.json), unless the database path is set itself
+        val dataDir = vars["KARLSTODIAN_DATA"]?.takeIf { it.isNotBlank() }
+        if (dataDir != null && "db_path" !in set) obj["db_path"] = JsonPrimitive(Paths.get(dataDir).resolve("pruner.db").toString())
+        return decode(JsonObject(obj)) to set
     }
 
     private fun dotEnv(): Map<String, String> {
