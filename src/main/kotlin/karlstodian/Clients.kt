@@ -79,6 +79,12 @@ abstract class ServiceClient(
         if (body != null) setBody(TextContent(body.toString(), ContentType.Application.Json))
     }.bodyAsText()
 
+    /** Raw bytes (images) and the response's content type. */
+    suspend fun bytes(path: String, query: Map<String, Any?> = emptyMap()): Pair<ByteArray, String?> {
+        val r = http.get { defaults(path, query); header(HttpHeaders.Accept, "image/*") }
+        return r.bodyAsBytes() to r.headers[HttpHeaders.ContentType]
+    }
+
     override fun close() = http.close()
 }
 

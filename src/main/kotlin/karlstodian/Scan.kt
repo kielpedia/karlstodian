@@ -216,6 +216,7 @@ private fun applyPlex(item: Item, meta: JsonObject?, plays: Map<String, PlayStat
         item.plex_added_at = null
         item.plex_view_count = 0
         item.plex_last_viewed_at = null
+        item.plex_thumb = null; item.plex_art = null
         item.episode_count = 0; item.watched_episode_count = 0
         if (plays != null) {
             item.play_count = 0; item.unique_viewers = 0; item.watched_episodes_all = 0
@@ -229,6 +230,8 @@ private fun applyPlex(item: Item, meta: JsonObject?, plays: Map<String, PlayStat
     item.plex_added_at = epoch(meta["addedAt"])
     item.plex_view_count = meta.int("viewCount") ?: 0
     item.plex_last_viewed_at = epoch(meta["lastViewedAt"])
+    item.plex_thumb = meta.str("thumb")
+    item.plex_art = meta.str("art")
     if (item.kind == "show") {
         item.episode_count = meta.int("leafCount") ?: 0
         item.watched_episode_count = meta.int("viewedLeafCount") ?: 0
