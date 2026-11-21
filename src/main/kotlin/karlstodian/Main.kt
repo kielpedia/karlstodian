@@ -207,6 +207,10 @@ fun Application.module() {
                 call.respondText(page("$p.html"), ContentType.Text.Html)
             }
         }
+        get("/assets/theme.css") {
+            call.response.header(HttpHeaders.CacheControl, "no-cache")
+            call.respondText(page("theme.css"), ContentType.Text.CSS)
+        }
         get("/healthz") { call.respond(buildJsonObject { put("ok", true); put("version", APP_VERSION) }) }
 
         // settings
@@ -285,6 +289,17 @@ fun Application.module() {
                 "torrents" to json.encodeToJsonElement(db.torrents(hashes).map { it.copy(tracker = trackerHost(it.tracker)) }),
                 "user_plays" to json.encodeToJsonElement(db.userPlays(id)),
             )))
+        }
+
+        /** Poster or backdrop (kind = poster | art), through Karlstodian so no token reaches the browser. */
+        get("/api/items/{id}/image/{kind}") {
+            val kind = Images.Kind.of(call.parameters["kind"] ?: "")
+                ?: throw HttpError(HttpStatusCode.UnprocessableEntity, "kind must be poster or art")
+            val item = Store.db.item(itemId(call)) ?: throw HttpError(HttpStatusCode.NotFound, "Not Found")
+            val img = Images.get(item, kind) ?: throw HttpError(HttpStatusCode.NotFound, "No image")
+            // the page adds ?v=<source> to the URL, so a changed poster gets a new URL
+            call.response.header(HttpHeaders.CacheControl, "private, max-age=604800")
+            call.respondBytes(img.bytes, ContentType.parse(img.contentType))
         }
 
         /** Suggestion settings and free space, for the Library page. */

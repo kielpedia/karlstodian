@@ -160,6 +160,8 @@ class Db(path: String) {
             Triple("item", "suggest_dismissed", "BOOLEAN NOT NULL DEFAULT 0"),
             Triple("item", "suggested_at", "DATETIME"),
             Triple("item", "suggest_reason", "VARCHAR"),
+            Triple("item", "plex_thumb", "VARCHAR"),
+            Triple("item", "plex_art", "VARCHAR"),
         )
 
         private val SCHEMA = listOf(

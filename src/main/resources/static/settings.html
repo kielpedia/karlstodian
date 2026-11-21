@@ -21,7 +21,8 @@
   }
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.5 var(--sans); }
-  .wrap { max-width: 980px; margin: 0 auto; padding: 32px 16px 120px; }
+  .wrap { max-width: 980px; margin: 0 auto; padding: 24px 16px 120px; }
+  .intro { margin: 0 0 26px; color: var(--muted); font-size: 14px; }
   header { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 28px; }
   header h1 { margin: 0; font-size: 22px; letter-spacing: -0.01em; }
   header h1 span { color: var(--muted); font-weight: 400; }
@@ -64,14 +65,16 @@
   .bar .msg { font-size: 14px; color: var(--muted); }
   .bar .msg.err { color: var(--err); } .bar .msg.ok { color: var(--ok); }
 </style>
+<!-- shared look, after the page styles so it wins -->
+<link rel="stylesheet" href="/assets/theme.css">
 </head>
 <body>
 <div class="wrap">
-  <header>
-    <h1>Karlstodian <span id="app-version" style="font-size:12px"></span></h1>
+  <div class="top" id="top">
+    <span class="brand">Karlstodian <span class="ver" id="app-version"></span></span>
     <nav><a href="/library">Library</a><a href="/removals">Removals</a><a href="/settings" class="on">Settings</a></nav>
-    <p>Where each service lives and how to sign in to it. Saved keys never leave the server — leave a key field blank to keep it.</p>
-  </header>
+  </div>
+  <p class="intro">Where each service lives and how to sign in to it. Saved keys never leave the server — leave a key field blank to keep it.</p>
 
   <h2>Services</h2>
   <div class="grid" id="services"></div>
@@ -331,6 +334,7 @@ $("#save").onclick = save;
 $("#discard").onclick = () => { clears.clear(); fill(); };
 window.addEventListener("beforeunload", e => { if (!$("#save").disabled) e.preventDefault(); });
 load().then(testAllSaved).catch(e => updateBar(`Couldn't load settings: ${e.message}`, "err"));
+addEventListener("scroll", () => document.getElementById("top").classList.toggle("scrolled", scrollY > 4), { passive: true });
 </script>
 </body>
 </html>

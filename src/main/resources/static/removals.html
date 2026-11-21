@@ -69,10 +69,12 @@
     td, th { padding-left: 9px; padding-right: 9px; }
   }
 </style>
+<!-- shared look, after the page styles so it wins -->
+<link rel="stylesheet" href="/assets/theme.css">
 </head>
 <body>
 <div class="wrap">
-  <div class="top">
+  <div class="top" id="top">
     <span class="brand">Karlstodian <span class="ver" id="app-version"></span></span>
     <nav><a href="/library">Library</a><a href="/removals" class="on">Removals</a><a href="/settings">Settings</a></nav>
     <div class="right"><span class="muted" id="run-msg"></span><button class="btn" id="run">Check now</button></div>
@@ -194,6 +196,7 @@ $("#run").onclick = async () => {
   await load();
 };
 load().catch(e => { $("#banners").innerHTML = `<div class="banner err">Couldn't load: ${esc(e.message)}</div>`; });
+addEventListener("scroll", () => document.getElementById("top").classList.toggle("scrolled", scrollY > 4), { passive: true });
 </script>
 </body>
 </html>

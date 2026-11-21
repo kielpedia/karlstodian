@@ -32,6 +32,8 @@ data class Item(
     var plex_added_at: Instant? = null,
     var plex_view_count: Int = 0,
     var plex_last_viewed_at: Instant? = null,
+    var plex_thumb: String? = null,       // poster path on the Plex server, e.g. /library/metadata/1/thumb/1700000000
+    var plex_art: String? = null,         // backdrop path
 
     // Episodes (shows only)
     var episode_count: Int = 0,          // episodes in Plex

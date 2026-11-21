@@ -51,6 +51,12 @@ repo and on the server.
   Tracker URLs carry passkeys: only the host is ever stored (`trackerHost`).
 - `Main.kt`: Ktor routes, cron scheduler (cron-utils, UNIX syntax, server local time), hourly removal timer, `main`.
 - `src/main/resources/static/*.html`: Library, Removals, Settings. Plain HTML+JS, no build step.
+  `theme.css` (served at /assets/theme.css) holds the shared colours, header and buttons. The Library
+  has a poster grid and a list view (choice kept in localStorage).
+- `Images.kt`: posters/backdrops for the UI via `GET /api/items/{id}/image/{poster|art}`: Plex's
+  photo transcoder (`item.plex_thumb`/`plex_art`, stored by the scan), else Radarr/Sonarr
+  `/api/v3/mediacover/{id}/poster-500.jpg|fanart.jpg`. Cached in `<data>/cache/images`; misses
+  remembered a day. Tokens never reach the browser.
 
 Keep the `PRUNER_*` env prefix and `data/pruner.db` - renaming would orphan existing data.
 
